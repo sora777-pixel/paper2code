@@ -1,0 +1,30 @@
+# paper2code 默认配置
+# 优先级：命令行参数 > 环境变量 > 本文件 > 代码内默认值
+
+# --- 大模型 ---
+# offline：零依赖、纯规则/抽取式，开箱即用
+# openai ：任何 OpenAI 兼容端点（OpenAI / DeepSeek / 通义 / vLLM / Ollama）
+llm_mode: offline
+llm_base_url: https://api.deepseek.com/v1 #https://api.openai.com/v1
+llm_api_key: ""
+llm_model: deepseek-flash #gpt-4o-mini
+llm_timeout: 120
+llm_temperature: 0.3
+
+# --- 语音合成 ---
+# auto：有 edge-tts 就用，否则降级；edge：强制（缺失则只出字幕）；off：完全关闭
+tts_mode: auto
+tts_voice_a: zh-CN-YunxiNeural     # 主持人（男声）
+tts_voice_b: zh-CN-XiaoxiaoNeural  # 讲解人（女声）
+
+# --- 复现约束（单机 + 小数据集） ---
+max_records: 10000     # 单次执行的数据记录上限
+exec_timeout: 120      # 单次沙箱执行超时（秒）
+allow_network: false   # 复现脚本默认断网
+random_seed: 0
+rel_tolerance: 0.05    # 相对误差 <=5%  记为 pass
+rel_warn: 0.20         # 相对误差 <=20% 记为 warn，超过为 fail
+
+# --- 讲解材料 ---
+max_slides: 14
+style: teaching        # teaching | executive | exam

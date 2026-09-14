@@ -1,0 +1,43 @@
+﻿text,label
+python pandas dataframe merge join groupby,0
+pandas groupby aggregate multiple columns,0
+numpy array reshape broadcasting tutorial,0
+python list comprehension vs generator performance,0
+matplotlib subplot legend title formatting,0
+sklearn train test split random state,0
+docker compose environment variables secrets,1
+kubernetes pod crashloopbackoff debugging,1
+linux find grep xargs pipeline examples,1
+bash script exit code error handling,1
+nginx reverse proxy websocket timeout,1
+systemd service restart policy unit file,1
+cuda out of memory pytorch batch size,2
+pytorch dataloader num workers slow,2
+tensorflow gpu device placement error,2
+transformer attention mask implementation,2
+fine tune bert classification small dataset,2
+gradient accumulation mixed precision training,2
+sql join index slow query explain plan,3
+postgres jsonb index gin performance,3
+redis cache eviction policy lru,3
+mysql deadlock transaction isolation level,3
+elasticsearch mapping analyzer tokenizer,3
+kafka consumer group rebalance latency,3
+react hooks useeffect dependency array,4
+typescript generic constraint keyof,4
+javascript promise allsettled error handling,4
+css grid responsive layout breakpoints,4
+webpack code splitting lazy load,4
+vite build optimize chunk size,4
+git rebase interactive squash commits,5
+git cherry pick conflict resolution,5
+github actions matrix build cache,5
+git submodule update recursive init,5
+ssh key passphrase agent forwarding,5
+makefile phony target dependency,5
+http2 multiplexing head of line blocking,6
+tcp congestion control slow start,6
+dns resolution order caching ttl,6
+tls handshake certificate chain verify,6
+grpc protobuf streaming deadline,6
+websocket reconnect exponential backoff,6

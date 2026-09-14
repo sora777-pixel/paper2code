@@ -1,0 +1,45 @@
+﻿# Python / venv
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Local secrets & env
+.env
+.env.*
+configs/secrets.local.yaml
+configs/*.local.yaml
+*.pem
+
+# Runtime / work dirs
+.work/
+.workbuddy/
+outputs/
+incoming/
+
+# Media / generated
+*.mp3
+*.wav
+Thumbs.db
+Desktop.ini
+
+# Logs & root scratch only (leading / = repo root)
+*.log
+/_*.log
+/_*.txt
+/_*.py
+/_*.bat
+pdf-bakeoff/
+*.bak_*
+*.bak
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

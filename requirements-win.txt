@@ -1,0 +1,11 @@
+# ASCII-only extras for Windows pip (GBK locale cannot read UTF-8 comments in requirements.txt)
+pyyaml>=6.0
+pymupdf>=1.24
+pdfplumber>=0.11
+matplotlib>=3.8
+numpy>=1.24
+edge-tts>=6.1
+fastapi>=0.110
+uvicorn>=0.29
+requests>=2.31
+python-multipart>=0.0.9

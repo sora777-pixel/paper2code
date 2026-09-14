@@ -1,0 +1,5 @@
+﻿Variant,Accuracy,Share(%)
+Full model,78.3%,41.2%
+w/o exponentiated refinement,74.1%,28.6%
+w/o PMI anchor scoring,71.9%,19.4%
+w/o simplex volume selection,69.6%,10.8%
