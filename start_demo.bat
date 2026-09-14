@@ -7,13 +7,16 @@ set PYTHONIOENCODING=utf-8
 set "PY=D:\Python311\python.exe"
 set "VENV=%CD%\.venv\Scripts\python.exe"
 set "PORT=8010"
-set "P2C_PDF_BACKEND=hybrid"
+REM Web 上传默认走 PyMuPDF：秒级出课件。hybrid/Docling 首次可卡数分钟，仅按需开启。
+set "P2C_PDF_BACKEND=pymupdf"
+set "P2C_DOCLING_TIMEOUT=90"
 set "P2C_DOCLING_PYTHON=C:\Users\lenovo\paper2code-xfer\pdf-bakeoff\.venv\Scripts\python.exe"
 if not exist "%P2C_DOCLING_PYTHON%" (
-  echo [warn] Docling bakeoff python missing; PDF backend falls back to pymupdf
-  set "P2C_PDF_BACKEND=pymupdf"
+  echo [warn] Docling bakeoff python missing; PDF backend stays pymupdf
   set "P2C_DOCLING_PYTHON="
 )
+REM 需要 Docling 高精度时取消下一行注释：
+REM set "P2C_PDF_BACKEND=hybrid"
 
 if not exist "%PY%" (
   echo [ERROR] missing D:\Python311\python.exe

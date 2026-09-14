@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -26,6 +27,28 @@ BUNDLE_PAPER_NAMES = ("paper.md", "paper.markdown", "paper.html", "paper.htm", "
 BUNDLE_DATA_DIR = ("data", "datasets", "tables")
 BUNDLE_CODE_DIR = ("code", "repo", "source")
 
+# Windows MAX_PATH is 260. incoming/<id>/paper.pdf must stay well under that.
+PAPER_ID_MAX = 72
+_ID_SUFFIXES = {".pdf", ".md", ".html", ".htm", ".txt", ".zip", ".markdown"}
+
+
+def sanitize_paper_id(name: str, max_len: int = PAPER_ID_MAX) -> str:
+    """Filesystem-safe paper_id from a filename or folder name.
+
+    Long Nature-style titles are truncated and given a short hash so
+    ``incoming/<id>/paper.pdf`` stays valid on Windows.
+    """
+    raw = Path(name or "paper").name
+    p = Path(raw)
+    base = p.stem if p.suffix.lower() in _ID_SUFFIXES else raw
+    base = re.sub(r"[^\w.\-\u4e00-\u9fff]+", "_", base, flags=re.UNICODE).strip("._")
+    base = base or "paper"
+    if len(base) <= max_len:
+        return base
+    digest = hashlib.sha1(base.encode("utf-8")).hexdigest()[:8]
+    keep = max(8, max_len - 9)
+    return f"{base[:keep].rstrip('._-')}_{digest}"
+
 
 def paper_id_from_path(path: Path) -> str:
     """Filesystem-safe id from a path stem; keep CJK / unicode word chars.
@@ -36,9 +59,7 @@ def paper_id_from_path(path: Path) -> str:
     dashboard card pointed at the upload id while artifacts landed under
     outputs/paper/ and the detail page showed 尚未生成 for everything.
     """
-    stem = path.stem
-    stem = re.sub(r"[^\w.\-\u4e00-\u9fff]+", "_", stem, flags=re.UNICODE).strip("._")
-    return (stem or "paper")[:120]
+    return sanitize_paper_id(path.name)
 
 
 # --------------------------------------------------------------------------- #

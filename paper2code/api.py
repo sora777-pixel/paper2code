@@ -34,9 +34,11 @@ from __future__ import annotations
 import json
 import re as _re
 import shutil
+import threading
 import time
 from datetime import datetime
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -63,6 +65,57 @@ except Exception:  # pragma: no cover
 
     class BaseModel:  # type: ignore
         pass
+
+
+_RUN_LOCK = threading.Lock()
+_RUN_JOBS: Dict[str, Dict[str, Any]] = {}
+
+
+def _job_snapshot(paper_id: str) -> Dict[str, Any]:
+    with _RUN_LOCK:
+        job = dict(_RUN_JOBS.get(paper_id) or {})
+    if job:
+        return job
+    return {"status": "unknown", "paper_id": paper_id}
+
+
+def _spawn_paper_run(source: str, paper_id: str) -> None:
+    """Start run_paper in a daemon thread so the upload form can return immediately."""
+    with _RUN_LOCK:
+        _RUN_JOBS[paper_id] = {"status": "running", "paper_id": paper_id}
+
+    def _bg() -> None:
+        t0 = time.perf_counter()
+        try:
+            manifest = run_paper(
+                source,
+                explain=("courseware", "podcast"),
+                reproduce=True,
+                audio=False,
+            )
+            elapsed = time.perf_counter() - t0
+            print(
+                f"[paper2code] /api/run ok paper_id={manifest.get('paper_id')} "
+                f"elapsed={elapsed:.1f}s backend={(manifest.get('stats') or {})}",
+                flush=True,
+            )
+            with _RUN_LOCK:
+                rec = {
+                    "status": "ok",
+                    "paper_id": manifest.get("paper_id") or paper_id,
+                    "manifest": manifest,
+                }
+                _RUN_JOBS[paper_id] = rec
+                if rec["paper_id"] != paper_id:
+                    _RUN_JOBS[rec["paper_id"]] = rec
+        except Exception as exc:
+            elapsed = time.perf_counter() - t0
+            detail = _scrub_secret(f"{type(exc).__name__}: {exc}")
+            print(f"[paper2code] /api/run fail after {elapsed:.1f}s: {detail}", flush=True)
+            with _RUN_LOCK:
+                _RUN_JOBS[paper_id] = {"status": "error", "paper_id": paper_id, "detail": detail}
+
+    threading.Thread(target=_bg, daemon=True, name=f"p2c-run-{paper_id}").start()
 
 
 def _scrub_secret(text: str, secret: str = "") -> str:
@@ -92,17 +145,18 @@ def _maybe_apply_llm(
     base_url: Optional[str] = None,
     model: Optional[str] = None,
     llm_mode: Optional[str] = None,
+    persist: bool = False,
 ) -> None:
-    """Apply only non-empty fields; empty string = ignore."""
+    """Apply only non-empty fields; empty string = keep existing key."""
     key = api_key if (api_key is not None and str(api_key).strip()) else None
     if key is not None and _looks_like_filepath_key(key):
         key = None
     url = base_url if (base_url is not None and str(base_url).strip()) else None
     mdl = model if (model is not None and str(model).strip()) else None
     mode = llm_mode if (llm_mode is not None and str(llm_mode).strip()) else None
-    if key is None and url is None and mdl is None and mode is None:
+    if key is None and url is None and mdl is None and mode is None and not persist:
         return
-    apply_llm_runtime(api_key=key, base_url=url, model=mdl, mode=mode)
+    apply_llm_runtime(api_key=key, base_url=url, model=mdl, mode=mode, persist=persist)
 
 
 def _ping_llm(timeout: float = 20.0) -> Dict[str, Any]:
@@ -151,20 +205,26 @@ def _ping_llm(timeout: float = 20.0) -> Dict[str, Any]:
 
 def _sanitize_paper_id(name: str) -> str:
     """Derive a filesystem-safe paper_id from a filename or folder name."""
-    raw = Path(name or "paper").name
-    p = Path(raw)
-    if p.suffix.lower() in (".pdf", ".md", ".html", ".htm", ".txt", ".zip", ".markdown"):
-        base = p.stem
-    else:
-        base = raw
-    base = _re.sub(r"[^\w.\-\u4e00-\u9fff]+", "_", base, flags=_re.UNICODE).strip("._")
-    return (base or "paper")[:120]
+    from .ingest.loader import sanitize_paper_id
+
+    return sanitize_paper_id(name)
+
+
+def _upload_suffix(name: str) -> str:
+    suf = Path(name or "").suffix.lower()
+    if suf == ".htm":
+        return ".html"
+    return suf or ".bin"
 
 
 def _safe_upload_name(name: str) -> str:
+    """Keep the real extension; never slice through ``.pdf``."""
     base = Path(name or "upload.bin").name
-    base = _re.sub(r"[^\w.\-\u4e00-\u9fff]+", "_", base, flags=_re.UNICODE).strip("._")
-    return (base or "upload.bin")[:120]
+    suffix = Path(base).suffix
+    stem = Path(base).stem if suffix else base
+    stem = _re.sub(r"[^\w.\-\u4e00-\u9fff]+", "_", stem, flags=_re.UNICODE).strip("._")
+    stem = (stem or "upload")[:80]
+    return f"{stem}{suffix}"
 
 
 def _incoming_root() -> Path:
@@ -490,6 +550,7 @@ def _maybe_apply_tts(
     model=None,
     provider=None,
     voice=None,
+    persist: bool = False,
 ):
     key = api_key if (api_key is not None and str(api_key).strip()) else None
     if key is not None and _looks_like_filepath_key(key):
@@ -498,9 +559,9 @@ def _maybe_apply_tts(
     mdl = model if (model is not None and str(model).strip()) else None
     prov = provider if (provider is not None and str(provider).strip()) else None
     voi = voice if (voice is not None and str(voice).strip()) else None
-    if key is None and url is None and mdl is None and prov is None and voi is None:
+    if key is None and url is None and mdl is None and prov is None and voi is None and not persist:
         return
-    apply_tts_runtime(api_key=key, base_url=url, model=mdl, provider=prov, voice=voi)
+    apply_tts_runtime(api_key=key, base_url=url, model=mdl, provider=prov, voice=voi, persist=persist)
 
 
 
@@ -645,12 +706,14 @@ if _HAS_FASTAPI:
         base_url: Optional[str] = None
         model: Optional[str] = None
         llm_mode: Optional[str] = None
+        wait: bool = True
 
     class LlmSettingsRequest(BaseModel):
         api_key: Optional[str] = None
         base_url: Optional[str] = None
         model: Optional[str] = None
         llm_mode: Optional[str] = None
+        persist: bool = True
 
     @app.get("/api/runs")
     def api_runs() -> List[Dict[str, Any]]:
@@ -665,22 +728,77 @@ if _HAS_FASTAPI:
 
     @app.post("/api/run")
     def api_run_post(req: RunRequest) -> Dict[str, Any]:
-        _maybe_apply_llm(req.api_key, req.base_url, req.model, req.llm_mode)
+        _maybe_apply_llm(req.api_key, req.base_url, req.model, req.llm_mode, persist=bool(req.api_key))
         explain = tuple(k.strip() for k in req.explain.split(",") if k.strip())
         source = _resolve_run_source(req.source or "", getattr(req, "paper_id", None))
         if not source:
             raise HTTPException(status_code=400, detail="缺少 source / paper_id")
-        try:
-            if not Path(source).exists():
-                raise FileNotFoundError(
+        if not Path(source).exists():
+            raise HTTPException(
+                status_code=400,
+                detail=(
                     f"找不到输入：{source}"
                     + (f"（paper_id={req.paper_id}）" if req.paper_id else "")
                     + "。请确认已上传，或改用 paper_id 字段。"
+                ),
+            )
+        paper_id = (req.paper_id or "").strip() or Path(source).name
+        secret = req.api_key or ""
+
+        def _execute() -> Dict[str, Any]:
+            with _RUN_LOCK:
+                _RUN_JOBS[paper_id] = {"status": "running", "paper_id": paper_id}
+            t0 = time.perf_counter()
+            try:
+                manifest = run_paper(source, explain=explain, reproduce=req.reproduce, audio=req.audio)
+                elapsed = time.perf_counter() - t0
+                print(
+                    f"[paper2code] /api/run ok paper_id={manifest.get('paper_id')} "
+                    f"elapsed={elapsed:.1f}s backend={(manifest.get('stats') or {})}",
+                    flush=True,
                 )
-            return run_paper(source, explain=explain, reproduce=req.reproduce, audio=req.audio)
+                with _RUN_LOCK:
+                    _RUN_JOBS[paper_id] = {
+                        "status": "ok",
+                        "paper_id": manifest.get("paper_id") or paper_id,
+                        "manifest": manifest,
+                    }
+                    if manifest.get("paper_id") and manifest["paper_id"] != paper_id:
+                        _RUN_JOBS[manifest["paper_id"]] = _RUN_JOBS[paper_id]
+                return manifest
+            except Exception as exc:
+                elapsed = time.perf_counter() - t0
+                detail = _scrub_secret(f"{type(exc).__name__}: {exc}", secret)
+                print(f"[paper2code] /api/run fail after {elapsed:.1f}s: {detail}", flush=True)
+                with _RUN_LOCK:
+                    _RUN_JOBS[paper_id] = {"status": "error", "paper_id": paper_id, "detail": detail}
+                raise
+
+        if req.wait is False:
+            def _bg() -> None:
+                try:
+                    _execute()
+                except Exception:
+                    pass
+
+            threading.Thread(target=_bg, daemon=True, name=f"p2c-run-{paper_id}").start()
+            return {"ok": True, "accepted": True, "status": "running", "paper_id": paper_id, "source": source}
+
+        try:
+            return _execute()
+        except HTTPException:
+            raise
         except Exception as exc:
-            detail = _scrub_secret(f"{type(exc).__name__}: {exc}", req.api_key or "")
+            detail = _scrub_secret(f"{type(exc).__name__}: {exc}", secret)
             raise HTTPException(status_code=400, detail=detail) from exc
+
+    @app.get("/api/jobs/{paper_id}")
+    def api_job(paper_id: str) -> Dict[str, Any]:
+        try:
+            pid = _validate_paper_id(paper_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _job_snapshot(pid)
 
     @app.get("/api/papers")
     def api_papers() -> List[Dict[str, Any]]:
@@ -718,14 +836,20 @@ if _HAS_FASTAPI:
 
     @app.post("/api/llm/settings")
     def api_llm_settings(req: LlmSettingsRequest) -> Dict[str, Any]:
-        _maybe_apply_llm(req.api_key, req.base_url, req.model, req.llm_mode)
+        _maybe_apply_llm(req.api_key, req.base_url, req.model, req.llm_mode, persist=bool(req.persist))
         st = llm_status()
         return {"ok": True, **st}
 
     @app.post("/api/llm/test")
     def api_llm_test(req: LlmSettingsRequest) -> Dict[str, Any]:
-        _maybe_apply_llm(req.api_key, req.base_url, req.model, req.llm_mode)
-        return _ping_llm(timeout=20.0)
+        # Apply in-memory first; persist only after a successful ping so a typo
+        # does not overwrite the saved key. Empty key = reuse configs/api_keys.yaml.
+        _maybe_apply_llm(req.api_key, req.base_url, req.model, req.llm_mode, persist=False)
+        result = _ping_llm(timeout=20.0)
+        if result.get("ok") and (req.persist is not False):
+            _maybe_apply_llm(req.api_key, req.base_url, req.model, req.llm_mode, persist=True)
+            result.update(llm_status())
+        return result
 
     class TtsSettingsRequest(BaseModel):
         api_key: Optional[str] = None
@@ -733,6 +857,7 @@ if _HAS_FASTAPI:
         model: Optional[str] = None
         provider: Optional[str] = None
         voice: Optional[str] = None
+        persist: bool = True
 
     class TtsGenerateRequest(BaseModel):
         paper_id: str
@@ -745,17 +870,19 @@ if _HAS_FASTAPI:
     @app.post("/api/upload")
     async def api_upload(file: UploadFile = File(...)):
         """Save uploaded paper under incoming/<paper_id>/paper.* (stem-named folder)."""
-        raw_name = file.filename or "paper.pdf"
-        safe = _safe_upload_name(raw_name)
-        paper_id = _allocate_paper_id(safe)
+        raw_name = Path(file.filename or "paper.pdf").name
+        suffix = _upload_suffix(raw_name)
+        paper_id = _allocate_paper_id(raw_name)
         dest_dir = _incoming_root() / paper_id
         # path-traversal safe: paper_id has no separators
         dest_dir.mkdir(parents=True, exist_ok=True)
-        suffix = Path(safe).suffix.lower() or ".bin"
-        if suffix in (".pdf", ".md", ".html", ".htm", ".txt"):
-            dest_name = f"paper{suffix if suffix != '.htm' else '.html'}"
+        if suffix in (".pdf", ".md", ".html", ".txt"):
+            dest_name = f"paper{suffix}"
+        elif suffix == ".zip":
+            dest_name = "bundle.zip"
         else:
-            dest_name = safe
+            dest_name = _safe_upload_name(raw_name)
+        dest = dest_dir / dest_name
         dest = dest_dir / dest_name
         try:
             with dest.open("wb") as fh:
@@ -800,19 +927,23 @@ if _HAS_FASTAPI:
 
     @app.post("/api/tts/settings")
     def api_tts_settings(req: TtsSettingsRequest):
-        _maybe_apply_tts(req.api_key, req.base_url, req.model, req.provider, req.voice)
+        _maybe_apply_tts(req.api_key, req.base_url, req.model, req.provider, req.voice, persist=bool(req.persist))
         return {"ok": True, **tts_status()}
 
     @app.post("/api/tts/test")
     def api_tts_test(req: TtsSettingsRequest) -> Dict[str, Any]:
         """Probe TTS with a tiny speech request. Never returns the API key."""
-        _maybe_apply_tts(req.api_key, req.base_url, req.model, req.provider, req.voice)
-        return _ping_tts(timeout=30.0)
+        _maybe_apply_tts(req.api_key, req.base_url, req.model, req.provider, req.voice, persist=False)
+        result = _ping_tts(timeout=30.0)
+        if result.get("ok") and (req.persist is not False):
+            _maybe_apply_tts(req.api_key, req.base_url, req.model, req.provider, req.voice, persist=True)
+            result.update(tts_status())
+        return result
 
     @app.post("/api/tts/generate")
     def api_tts_generate(req: TtsGenerateRequest):
         """Synthesize podcast audio for an existing run; save under outputs/<pid>/explain/."""
-        _maybe_apply_tts(req.api_key, req.base_url, req.model, req.provider, req.voice)
+        _maybe_apply_tts(req.api_key, req.base_url, req.model, req.provider, req.voice, persist=bool(req.api_key))
         try:
             pid = _validate_paper_id(req.paper_id)
         except ValueError as exc:
@@ -846,6 +977,37 @@ if _HAS_FASTAPI:
             "warnings": engine.warnings,
             **status,
         }
+
+    @app.post("/go", response_class=HTMLResponse)
+    async def go_upload_and_run(file: UploadFile = File(...)):
+        """No-JS fallback: native form POST uploads the PDF and starts parsing."""
+        saved = await api_upload(file)
+        paper_id = str(saved.get("paper_id") or "")
+        source = str(saved.get("path") or "")
+        if paper_id and source:
+            _spawn_paper_run(source, paper_id)
+        pid_js = json.dumps(paper_id)
+        href = "/paper/" + urllib.parse.quote(paper_id, safe="")
+        shown = paper_id.replace("<", "").replace(">", "")
+        return (
+            "<!DOCTYPE html><html lang='zh-CN'><head><meta charset='utf-8'/>"
+            "<title>正在解析…</title>"
+            "<style>body{font:16px/1.6 -apple-system,'Microsoft YaHei',sans-serif;"
+            "max-width:640px;margin:60px auto;padding:0 20px;color:#1b2130}"
+            "a{color:#4f6bed}</style></head><body>"
+            "<h1>正在生成解析</h1>"
+            "<p id='msg'>已上传 " + shown
+            + "，正在生成课件 / 播客 / 复现（大约 1 分钟）…</p>"
+            "<p><a href='" + href + "'>打开详情页</a> · <a href='/'>返回首页</a></p>"
+            "<script>const PID=" + pid_js + ";"
+            "async function poll(){"
+            "try{const j=await(await fetch('/api/jobs/'+encodeURIComponent(PID))).json();"
+            "if(j.status==='ok'){location.href='/paper/'+encodeURIComponent(PID);return;}"
+            "if(j.status==='error'){document.getElementById('msg').textContent='失败：'+(j.detail||'');return;}"
+            "}catch(e){}"
+            "setTimeout(poll,1000);}poll();</script>"
+            "</body></html>"
+        )
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard() -> str:
@@ -934,7 +1096,7 @@ background:#fef2f2;color:var(--fail);font-size:13.5px;font-weight:650;white-spac
 <body><div class="wrap">
 <header>
   <h1>paper2code · <span>论文学习工具</span></h1>
-  <div class="sub">选择 PDF 后点「上传并生成解析」→ 自动上传并跑讲解+复现。API / TTS 请到「设置」配置。</div>
+  <div class="sub">选择 PDF 后点「上传并生成解析」。已保存的 API Key 会自动使用，不必每次再填。</div>
   <div class="nav">
     <a class="active" href="/">首页</a>
     <a href="/settings">设置</a>
@@ -943,11 +1105,14 @@ background:#fef2f2;color:var(--fail);font-size:13.5px;font-weight:650;white-spac
 
 <div class="panel">
   <div class="title">上传并生成解析</div>
-  <div class="hint">支持 PDF / Markdown / HTML / ZIP。一步完成：上传到 incoming/&lt;stem&gt;/ 后立即生成解析（讲解+复现，默认不生成语音）。</div>
+  <div class="hint">点按钮会弹出选文件窗口；选好 PDF 后自动上传并生成课件 / 播客 / 复现（大约 1 分钟）。</div>
+  <div id="keyChip" class="hint" style="margin-top:8px"></div>
+  <form id="goForm" action="/go" method="post" enctype="multipart/form-data">
   <div class="row">
-    <input type="file" id="file" accept=".pdf,.md,.html,.htm,.zip,application/pdf,application/zip"/>
-    <button type="button" id="doRun">上传并生成解析</button>
+    <input type="file" name="file" id="file" required accept=".pdf,.md,.html,.htm,.zip,application/pdf,application/zip"/>
+    <button type="submit" id="doRun">上传并生成解析</button>
   </div>
+  </form>
   <div id="runStatus"></div>
   <div id="runError" role="alert"></div>
 </div>
@@ -960,6 +1125,19 @@ background:#fef2f2;color:var(--fail);font-size:13.5px;font-weight:650;white-spac
 const grid=document.getElementById('grid'),toast=document.getElementById('toast');
 const fileInput=document.getElementById('file'),doRun=document.getElementById('doRun');
 const runStatus=document.getElementById('runStatus');
+
+(async()=>{
+  const chip=document.getElementById('keyChip');
+  if(!chip) return;
+  try{
+    const s=await (await fetch('/api/llm/status')).json();
+    if(s.has_key){
+      chip.textContent='LLM Key 已就绪'+(s.key_hint?'（'+s.key_hint+'）':'')+' · 来自 '+(s.key_source_label||'本机')+' · 直接上传即可，无需再填';
+    }else{
+      chip.innerHTML='尚未保存 LLM Key，将用离线模式。只需在<a href="/settings">设置</a>里填一次并保存。';
+    }
+  }catch(e){}
+})();
 
 function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function setStatus(msg, cls){runStatus.textContent=msg||'';runStatus.className=cls||'';}
@@ -1001,7 +1179,7 @@ async function load(){
   grid.querySelectorAll('button[data-del]').forEach(btn=>{
     btn.onclick=async()=>{
       const pid=btn.getAttribute('data-del');
-      if(!confirm('确认删除论文「'+pid+'」？\n将同时删除 incoming 与 outputs 下该论文的全部文件，且不可恢复。'))return;
+      if(!confirm('确认删除论文「'+pid+'」？\\n将同时删除 incoming 与 outputs 下该论文的全部文件，且不可恢复。'))return;
       btn.disabled=true;
       try{
         const r=await fetch('/api/papers/'+encodeURIComponent(pid),{method:'DELETE'});
@@ -1014,13 +1192,35 @@ async function load(){
   });
 }
 
-doRun.onclick=async()=>{
-  if(!fileInput.files||!fileInput.files[0]){setStatus('请先选择文件','err');setRunError('请先选择文件');return}
+doRun.onclick=null;
+const goForm=document.getElementById('goForm');
+if(goForm){
+  goForm.addEventListener('submit',function(ev){
+    if(!fileInput.files||!fileInput.files[0]){
+      return;
+    }
+    ev.preventDefault();
+    startPipeline();
+  });
+}
+fileInput.addEventListener('change',()=>{
+  if(fileInput.files&&fileInput.files[0]) startPipeline();
+});
+
+async function startPipeline(){
+  if(!fileInput.files||!fileInput.files[0]){setStatus('请先选择文件','err');setRunError('请先选择 PDF（或点按钮弹出选择窗口）');return}
+  if(doRun.disabled) return;
   doRun.disabled=true;
-  setStatus('上传中…','busy');
+  const fname=fileInput.files[0].name||'file';
+  setStatus('正在上传 '+fname+' …','busy');
   setRunError('');
   toast.textContent='';
   let paperId='';
+  const t0=Date.now();
+  const tick=setInterval(()=>{
+    const s=Math.round((Date.now()-t0)/1000);
+    if(paperId) setStatus('解析中… '+paperId+' · 已用 '+s+' 秒（调用模型时大约 1 分钟）','busy');
+  },1000);
   try{
     const fd=new FormData(); fd.append('file', fileInput.files[0]);
     const ur=await fetch('/api/upload',{method:'POST',body:fd});
@@ -1028,49 +1228,72 @@ doRun.onclick=async()=>{
     if(!ur.ok||!ud.path){
       const msg='上传失败：'+errDetail(ud);
       setStatus(msg,'err'); setRunError(msg);
-      doRun.disabled=false;
       return;
     }
     paperId=ud.paper_id||'';
-    // Prefer bundle dir path; fall back to file path (server normalizes paper.* → parent)
     const source=ud.path||ud.dir||ud.file;
     if(!source){
       const msg='上传响应缺少 path';
       setStatus(msg,'err'); setRunError(msg);
-      doRun.disabled=false;
       return;
     }
-    setStatus('解析中…'+(paperId?'（'+paperId+'）':''),'busy');
-    toast.textContent='已上传：'+paperId+'，正在生成解析（请勿关闭，首次 PDF 可能较久）…';
-    // Refresh list but NEVER let a load() failure skip /api/run
+    setStatus('已上传 '+paperId+'，正在生成解析…','busy');
+    toast.textContent='已上传：'+paperId+'，正在生成解析…';
     try{ await load(); }catch(_e){}
-    const body={source:source,paper_id:paperId||undefined,explain:'courseware,podcast',reproduce:true,audio:false};
+    const body={source:source,paper_id:paperId||undefined,explain:'courseware,podcast',reproduce:true,audio:false,wait:false};
     const rr=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify(body)});
     const rd=await rr.json().catch(()=>({}));
-    if(rr.ok){
-      const doneId=rd.paper_id||paperId;
-      if(rd.paper_id && paperId && rd.paper_id!==paperId){
-        const msg='完成但 paper_id 不一致：上传='+paperId+'，产物='+rd.paper_id;
-        setStatus(msg,'err'); setRunError(msg);
-      }else{
-        setStatus('完成','ok'); setRunError('');
-        toast.textContent='完成：'+doneId+' — 正在打开详情…';
-      }
-      try{ await load(); }catch(_e){}
-      if(doneId) location.href='/paper/'+encodeURIComponent(doneId);
-    }else{
+    if(!rr.ok){
       const msg='解析失败：'+errDetail(rd);
       setStatus(msg,'err'); setRunError(msg);
       try{ await load(); }catch(_e){}
+      return;
     }
+    const doneId=rd.paper_id||paperId;
+    let lastErr='';
+    for(let i=0;i<180;i++){
+      await new Promise(r=>setTimeout(r,1000));
+      try{
+        const jr=await fetch('/api/jobs/'+encodeURIComponent(doneId));
+        const jd=await jr.json().catch(()=>({}));
+        if(jd.status==='error'){
+          const msg='解析失败：'+(jd.detail||errDetail(jd));
+          setStatus(msg,'err'); setRunError(msg);
+          try{ await load(); }catch(_e){}
+          return;
+        }
+        if(jd.status==='ok'){
+          setStatus('完成','ok'); setRunError('');
+          toast.textContent='完成：'+doneId+' — 正在打开详情…';
+          try{ await load(); }catch(_e){}
+          location.href='/paper/'+encodeURIComponent(doneId);
+          return;
+        }
+      }catch(e){ lastErr=String(e); }
+      try{
+        const pr=await fetch('/api/papers/'+encodeURIComponent(doneId));
+        const pd=await pr.json().catch(()=>({}));
+        if(pr.ok && (pd.has_courseware||pd.has_podcast||pd.has_repro)){
+          setStatus('完成','ok'); setRunError('');
+          try{ await load(); }catch(_e){}
+          location.href='/paper/'+encodeURIComponent(doneId);
+          return;
+        }
+      }catch(e){ lastErr=String(e); }
+    }
+    const msg='解析超时（3 分钟仍无课件）。'+lastErr+' 请打开论文卡片查看是否已生成。';
+    setStatus(msg,'err'); setRunError(msg);
+    try{ await load(); }catch(_e){}
   }catch(e){
     const msg='请求失败：'+e;
     setStatus(msg,'err'); setRunError(msg);
     try{ await load(); }catch(_e){}
+  }finally{
+    clearInterval(tick);
+    doRun.disabled=false;
   }
-  doRun.disabled=false;
-};
+}
 load();
 </script></body></html>
 """
@@ -1126,7 +1349,7 @@ function pidFromPath(){
   return new URLSearchParams(location.search).get('id')||'';
 }
 const PID=pidFromPath();
-function miss(t){return '<div class="miss">尚未生成'+(t?' · '+esc(t):'')+'</div>'}
+function miss(t){return '<div class="miss">'+(window._p2cWait?'正在生成解析，请稍候（约 1 分钟）':'尚未生成')+(t?' · '+esc(t):'')+'</div>'}
 
 async function load(){
   if(!PID){document.getElementById('title').textContent='缺少 paper_id';return}
@@ -1197,7 +1420,10 @@ async function load(){
   // If artifacts not ready yet (user opened detail while /api/run still running),
   // poll until ready so the page does not stay stuck on 尚未生成.
   if(!hasCw && !hasPs && !hasRp && (d.status==='uploaded' || !d.has_outputs)){
-    setTimeout(load, 2500);
+    window._p2cWait=true;
+    setTimeout(load, 2000);
+  }else{
+    window._p2cWait=false;
   }
 
   const go=document.getElementById('ttsGo');
@@ -1273,7 +1499,7 @@ box-shadow:0 6px 18px rgba(24,39,75,.05)}
 <body><div class="wrap">
 <header>
   <h1>paper2code · <span>设置</span></h1>
-  <div class="sub">LLM 与 TTS 配置仅保存在本进程内存，<strong>不会写入磁盘</strong>。也可使用环境变量 / configs/default.yaml（手动编辑）。</div>
+  <div class="sub">Key 只需填一次，会写入本机 <code>configs/api_keys.yaml</code>（不入库）。之后上传解析会自动使用，输入框留空即表示沿用已保存的 Key。</div>
   <div class="nav">
     <a href="/">首页</a>
     <a class="active" href="/settings">设置</a>
@@ -1281,8 +1507,8 @@ box-shadow:0 6px 18px rgba(24,39,75,.05)}
 </header>
 
 <div class="llm-panel">
-  <div class="title">LLM 设置（仅本进程生效，密钥不写入磁盘）</div>
-  <div class="hint">空 Key 时保持离线默认；也可设环境变量 P2C_LLM_API_KEY。可选：在 configs/default.yaml 中手动填写（本页不会改该文件）。</div>
+  <div class="title">LLM 设置</div>
+  <div class="hint">保存后写入 configs/api_keys.yaml。已有 Key 时输入框留空即可，不必重复粘贴。</div>
   <div class="form-grid">
     <div class="field narrow">
       <label for="llmPreset">预设</label>
@@ -1296,7 +1522,7 @@ box-shadow:0 6px 18px rgba(24,39,75,.05)}
     </div>
     <div class="field" id="keyField">
       <label for="llmKey">API Key</label>
-      <input type="password" id="llmKey" placeholder="API Key（粘贴后仅存内存）" autocomplete="off"/>
+      <input type="password" id="llmKey" placeholder="已保存则留空；仅在更换 Key 时粘贴" autocomplete="off"/>
     </div>
     <div class="field" id="urlField">
       <label for="llmUrl">Base URL</label>
@@ -1309,14 +1535,14 @@ box-shadow:0 6px 18px rgba(24,39,75,.05)}
   </div>
   <div class="actions-row">
     <button type="button" class="secondary" id="llmTest">测试连接</button>
-    <button type="button" class="secondary" id="llmApply">保存到内存</button>
+    <button type="button" class="secondary" id="llmApply">保存到本机</button>
     <span id="llmStatus" class="muted"></span>
   </div>
 </div>
 
 <div class="llm-panel">
-  <div class="title">TTS 语音（SiliconFlow，密钥仅内存，不写磁盘）</div>
-  <div class="hint">环境变量 P2C_TTS_API_KEY；无 Key 时播客仍可用 edge-tts 离线兜底。播客稿页也可点「生成语音」。</div>
+  <div class="title">TTS 语音</div>
+  <div class="hint">同样保存到 configs/api_keys.yaml。无 Key 时可用 edge-tts。已保存则留空。</div>
   <div class="form-grid">
     <div class="field narrow">
       <label for="ttsPreset">预设</label>
@@ -1328,7 +1554,7 @@ box-shadow:0 6px 18px rgba(24,39,75,.05)}
     </div>
     <div class="field">
       <label for="ttsKey">TTS API Key</label>
-      <input type="password" id="ttsKey" placeholder="TTS Key（与 LLM Key 分开）" autocomplete="off"/>
+      <input type="password" id="ttsKey" placeholder="已保存则留空；仅在更换 Key 时粘贴" autocomplete="off"/>
     </div>
     <div class="field">
       <label for="ttsUrl">TTS Base URL</label>
@@ -1341,7 +1567,7 @@ box-shadow:0 6px 18px rgba(24,39,75,.05)}
   </div>
   <div class="actions-row">
     <button type="button" class="secondary" id="ttsTest">测试连接</button>
-    <button type="button" class="secondary" id="ttsApply">保存到内存</button>
+    <button type="button" class="secondary" id="ttsApply">保存到本机</button>
     <span id="ttsStatus" class="muted" style="font-size:13px"></span>
   </div>
 </div>
@@ -1384,19 +1610,29 @@ llmUrl.addEventListener('input',()=>{llmUrl.dataset.auto='0'});
 llmModel.addEventListener('input',()=>{llmModel.dataset.auto='0'});
 function llmPayload(){
   const v=preset.value;
-  if(v==='offline') return {llm_mode:'offline'};
-  const body={llm_mode:'openai'};
+  if(v==='offline') return {llm_mode:'offline', persist:true};
+  const body={llm_mode:'openai', persist:true};
   const k=llmKey.value.trim(); if(k) body.api_key=k;
   const u=llmUrl.value.trim(); if(u) body.base_url=u;
   const m=llmModel.value.trim(); if(m) body.model=m;
   return body;
 }
+function showLlmSaved(d){
+  if(d.has_key){
+    llmKey.value='';
+    llmKey.placeholder='已保存'+(d.key_hint?' '+d.key_hint:'')+'，留空继续使用';
+  }
+}
 llmApply.onclick=async()=>{
-  llmApply.disabled=true; llmStatus.className='muted'; llmStatus.textContent='应用中…';
+  llmApply.disabled=true; llmStatus.className='muted'; llmStatus.textContent='保存中…';
   try{
     const r=await fetch('/api/llm/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(llmPayload())});
     const d=await r.json();
-    if(d.ok){llmStatus.className='ok'; llmStatus.textContent='已应用 · '+(d.mode||'')+' · '+(d.model||'')+(d.has_key?' · 已配置 Key':' · 无 Key');}
+    if(d.ok){
+      showLlmSaved(d);
+      llmStatus.className='ok';
+      llmStatus.textContent='已保存到本机 · '+(d.mode||'')+' · '+(d.model||'')+(d.has_key?(' · '+(d.key_hint||'已配置 Key')+' · '+(d.key_source_label||'')):' · 无 Key');
+    }
     else {llmStatus.className='err'; llmStatus.textContent=d.error||JSON.stringify(d);}
   }catch(e){llmStatus.className='err';llmStatus.textContent='失败：'+e}
   llmApply.disabled=false;
@@ -1409,8 +1645,9 @@ llmTest.onclick=async()=>{
       body:JSON.stringify(llmPayload())});
     const d=await r.json();
     if(d.ok){
+      showLlmSaved(d);
       llmStatus.className='ok';
-      llmStatus.textContent='连接成功 · '+(d.latency_ms||'?')+' ms · '+(d.model||'')+(d.preview?' · '+String(d.preview).slice(0,40):'');
+      llmStatus.textContent='连接成功 · '+(d.latency_ms||'?')+' ms · '+(d.model||'')+(d.key_hint?' · 已写入 '+d.key_hint:'')+(d.preview?' · '+String(d.preview).slice(0,40):'');
     }else{
       llmStatus.className='err';
       llmStatus.textContent='连接失败：'+(d.error||JSON.stringify(d));
@@ -1432,7 +1669,7 @@ ttsPreset.onchange=applyTtsPreset; applyTtsPreset();
 ttsUrl.addEventListener('input',()=>{ttsUrl.dataset.auto='0'});
 ttsModel.addEventListener('input',()=>{ttsModel.dataset.auto='0'});
 function ttsPayload(){
-  const body={provider:ttsPreset.value};
+  const body={provider:ttsPreset.value, persist:true};
   const k=ttsKey.value.trim(); if(k) body.api_key=k;
   const u=ttsUrl.value.trim(); if(u) body.base_url=u;
   const m=ttsModel.value.trim(); if(m) body.model=m;
@@ -1447,8 +1684,10 @@ ttsTest.onclick=async()=>{
     const r=await fetch('/api/tts/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ttsPayload())});
     const d=await r.json();
     if(d.ok){
+      ttsKey.value='';
+      if(d.key_hint) ttsKey.placeholder='已保存 '+d.key_hint+'，留空继续使用';
       ttsStatusEl.className='ok';
-      ttsStatusEl.textContent='连接成功 · '+(d.latency_ms||'?')+' ms · '+(d.model||d.mode||'');
+      ttsStatusEl.textContent='连接成功 · '+(d.latency_ms||'?')+' ms · '+(d.model||d.mode||'')+(d.key_hint?' · '+d.key_hint:'');
     }else{
       ttsStatusEl.className='err';
       ttsStatusEl.textContent='测试失败：'+(d.error||JSON.stringify(d));
@@ -1462,7 +1701,14 @@ ttsApply.onclick=async()=>{
   try{
     const r=await fetch('/api/tts/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ttsPayload())});
     const d=await r.json();
-    ttsStatusEl.textContent=d.ok?('已应用 · '+(d.provider||'')+' · '+(d.model||'')+(d.has_key?' · 已配置 Key':' · 无 Key')):(d.error||JSON.stringify(d));
+    if(d.ok){
+      ttsKey.value='';
+      if(d.key_hint) ttsKey.placeholder='已保存 '+d.key_hint+'，留空继续使用';
+      ttsStatusEl.className='ok';
+      ttsStatusEl.textContent='已保存到本机 · '+(d.provider||'')+' · '+(d.model||'')+(d.has_key?(' · '+(d.key_hint||'已配置 Key')):' · 无 Key');
+    }else{
+      ttsStatusEl.className='err'; ttsStatusEl.textContent=d.error||JSON.stringify(d);
+    }
   }catch(e){ttsStatusEl.textContent='失败：'+e}
   ttsApply.disabled=false;
 };
@@ -1470,14 +1716,20 @@ applyPreset();
 (async()=>{
   try{
     const s=await (await fetch('/api/llm/status')).json();
-    if(s&&s.mode==='openai'&&s.has_key){
+    if(s&&(s.mode==='openai'||s.has_key)){
       const bu=(s.base_url||'');
-      preset.value=bu.includes('deepseek.com')?'deepseek':bu.includes('openrouter')?'openrouter':bu.includes('siliconflow')?'siliconflow':'custom';
+      preset.value=bu.includes('deepseek.com')?'deepseek':bu.includes('openrouter')?'openrouter':bu.includes('siliconflow')?'siliconflow':(s.mode==='offline'?'offline':'custom');
       if(s.base_url){llmUrl.value=s.base_url;llmUrl.dataset.auto='0'}
       if(s.model){llmModel.value=s.model;llmModel.dataset.auto='0'}
       applyPreset();
+    }
+    if(s&&s.has_key){
+      showLlmSaved(s);
+      llmStatus.className='ok';
+      llmStatus.textContent='已从 '+(s.key_source_label||'本机')+' 加载，无需重复输入'+(s.key_hint?' · '+s.key_hint:'')+' · '+(s.mode||'')+' · '+(s.model||'');
+    }else{
       llmStatus.className='muted';
-      llmStatus.textContent='已从环境/进程加载：'+s.mode+' · '+(s.model||'')+(s.has_key?' · 已配置 Key':'');
+      llmStatus.textContent='尚未保存 Key：填一次并点「保存到本机」，之后不用再填';
     }
   }catch(e){}
 })();
@@ -1491,7 +1743,15 @@ applyPreset();
       if(s.base_url){ttsUrl.value=s.base_url;ttsUrl.dataset.auto='0'}
       if(s.model){ttsModel.value=s.model;ttsModel.dataset.auto='0'}
       applyTtsPreset();
-      ttsStatusEl.textContent=(s.has_key?'已配置 TTS Key':'未配置 TTS Key')+' · '+(s.provider||'')+' · '+(s.model||'');
+      if(s.has_key){
+        ttsKey.value='';
+        ttsKey.placeholder='已保存'+(s.key_hint?' '+s.key_hint:'')+'，留空继续使用';
+        ttsStatusEl.className='ok';
+        ttsStatusEl.textContent='已从 '+(s.key_source_label||'本机')+' 加载，无需重复输入'+(s.key_hint?' · '+s.key_hint:'')+' · '+(s.provider||'')+' · '+(s.model||'');
+      }else{
+        ttsStatusEl.className='muted';
+        ttsStatusEl.textContent='未保存 TTS Key · 可用 edge-tts · '+(s.provider||'')+' · '+(s.model||'');
+      }
     }
   }catch(e){}
 })();

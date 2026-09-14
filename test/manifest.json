@@ -1,0 +1,76 @@
+{
+  "paper_id": "ui_click_test",
+  "title": "Where Does the Cache Hit Ratio Go?",
+  "authors": [
+    "Lian Zhou",
+    "Ruoxi Feng",
+    "Kaiyuan Wang authors: \"Lian Zhou",
+    "Ruoxi Feng",
+    "Kaiyuan Wang\""
+  ],
+  "source": "test/paper.pdf",
+  "source_kind": "pdf",
+  "created_at": "2026-09-15T01:38:38",
+  "provider": "auto(openai-compatible(deepseek-flash @ https://api.deepseek.com/v1), remote)",
+  "explain_mode": [
+    "courseware",
+    "podcast"
+  ],
+  "artifacts": {
+    "explain": {
+      "generator": "auto(openai-compatible(deepseek-flash @ https://api.deepseek.com/v1), remote)",
+      "outline": [
+        "问题开场：命中率为何对不上？",
+        "背景铺垫：CDN 与边缘缓存",
+        "核心矛盾：请求命中 vs 字节命中",
+        "测量部署：6321 万次请求",
+        "工作负载画像：按内容类别拆分",
+        "关键样本：静态资源的双面占比",
+        "指标定义：请求份额、字节份额与命中率",
+        "方法总览：采集、分类、统计",
+        "证据一：静态资源请求命中率 0.94",
+        "证据二：字节命中率 0.91 与字节份额 12.1%",
+        "解释机制：命中率被谁“吃掉”了",
+        "结果讨论：总命中率的误导性",
+        "局限与偏差：部署、分类与时间窗",
+        "复现路径：从数据到结论与开放问题"
+      ],
+      "courseware": "test/explain/courseware.html",
+      "podcast_script": "test/explain/podcast_script.md",
+      "podcast_srt": "test/explain/podcast.srt",
+      "podcast_audio": "test/explain/podcast.mp3",
+      "n_slides": 17,
+      "n_turns": 32
+    },
+    "reproduce": {
+      "mode": "no_code",
+      "mode_label": "情形 B · 无任何代码",
+      "ok": true,
+      "report": "test/reproduce/repro_report.md",
+      "report_html": "test/reproduce/repro_report.html",
+      "plan": "test/reproduce/repro_plan.json",
+      "tables_csv": {},
+      "figures": [],
+      "checks": {
+        "total": 0,
+        "pass": 0,
+        "warn": 0,
+        "fail": 0,
+        "skipped": 0,
+        "score": 0.0,
+        "verdict": "not_verifiable"
+      }
+    }
+  },
+  "stats": {
+    "sections": 0,
+    "tables": 2,
+    "figures": 1,
+    "algorithms": 0,
+    "code_refs": 0,
+    "provided_data": 0
+  },
+  "warnings": [
+    "以下要素在论文中未明确披露，无法复现：数据集/数据来源、超参数与训练配置、随机种子/重复次数、预处理与分词细节、硬件与运行环境。已列入报告，供人工补齐后二次复现。"
+  ]
+}

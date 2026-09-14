@@ -12,6 +12,8 @@ build/
 # Local secrets & env
 .env
 .env.*
+configs/api_keys.yaml
+configs/api_keys.yml
 configs/secrets.local.yaml
 configs/*.local.yaml
 *.pem

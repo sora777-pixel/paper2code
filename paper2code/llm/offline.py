@@ -238,9 +238,16 @@ class OfflineProvider(LLMProvider):
                 )
 
         # 结论页
-        bullets = self._bullets(paper.section_text("conclusion", "discussion") or paper.abstract, "结论", n=4)
-        slides.append(Slide(title="小结与可复现性", bullets=bullets, kind="takeaway",
-                            notes=self._repro_hint(paper)))
+        from ..explain.courseware import closing_bullets
+
+        slides.append(
+            Slide(
+                title="结论、展望与不足",
+                bullets=closing_bullets(paper),
+                kind="takeaway",
+                notes=self._repro_hint(paper),
+            )
+        )
         return slides
 
     # -- 内部工具 --------------------------------------------------------- #

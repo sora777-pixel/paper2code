@@ -6,12 +6,22 @@ YAML 为可选依赖，缺失时静默跳过。
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
+API_KEYS_FILE = ROOT / "configs" / "api_keys.yaml"
+API_KEYS_EXAMPLE = ROOT / "configs" / "api_keys.yaml.example"
+
+_SOURCE_LABEL = {
+    "file": "configs/api_keys.yaml",
+    "env": "环境变量",
+    "memory": "本进程内存",
+}
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
@@ -75,6 +85,19 @@ class Settings:
     def load(cls, config_file: Optional[Path] = None, **overrides: Any) -> "Settings":
         data: Dict[str, Any] = {}
         data.update(_load_yaml(ROOT / "configs" / "default.yaml"))
+        # 专用密钥文件 configs/api_keys.yaml（不入库）：高于 default.yaml，低于环境变量。
+        keys_dir = ROOT / "configs"
+        if not API_KEYS_FILE.exists() and not (keys_dir / "api_keys.yml").exists():
+            if API_KEYS_EXAMPLE.exists():
+                try:
+                    API_KEYS_FILE.write_text(API_KEYS_EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+                except OSError:
+                    pass
+        for _secret_name in ("api_keys.yaml", "api_keys.yml", "secrets.local.yaml"):
+            _secret_path = keys_dir / _secret_name
+            if _secret_path.exists():
+                data.update(_load_yaml(_secret_path))
+                break
         if config_file:
             data.update(_load_yaml(Path(config_file)))
 
@@ -181,16 +204,118 @@ def set_settings(settings: Settings) -> None:
     _settings = settings
 
 
+def _key_hint(secret: str) -> str:
+    """Mask a secret as ••••last4. Never returns the raw key."""
+    s = str(secret or "").strip()
+    if not s:
+        return ""
+    tail = re.sub(r"[^A-Za-z0-9]", "", s)[-4:]
+    return f"••••{tail}" if tail else "已保存"
+
+
+def _file_secret(field: str) -> str:
+    data = _load_yaml(API_KEYS_FILE)
+    if not data and (ROOT / "configs" / "api_keys.yml").exists():
+        data = _load_yaml(ROOT / "configs" / "api_keys.yml")
+    return str(data.get(field) or "").strip()
+
+
+def _yaml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    return json.dumps("" if value is None else str(value), ensure_ascii=False)
+
+
+def persist_api_keys(updates: Dict[str, Any]) -> Path:
+    """Merge fields into configs/api_keys.yaml (gitignored). Empty values skipped."""
+    clean: Dict[str, Any] = {}
+    for key, raw in (updates or {}).items():
+        if raw is None:
+            continue
+        val = str(raw).strip()
+        if not val:
+            continue
+        if key == "tts_base_url":
+            val = val.rstrip("/")
+            if val.endswith("/audio/speech"):
+                val = val[: -len("/audio/speech")].rstrip("/")
+        if key == "llm_base_url":
+            val = val.rstrip("/")
+            if val in ("https://api.deepseek.com", "http://api.deepseek.com"):
+                val = val + "/v1"
+        clean[key] = val
+    if not clean:
+        return API_KEYS_FILE
+
+    API_KEYS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    text = ""
+    if API_KEYS_FILE.exists():
+        text = API_KEYS_FILE.read_text(encoding="utf-8")
+    elif API_KEYS_EXAMPLE.exists():
+        text = API_KEYS_EXAMPLE.read_text(encoding="utf-8")
+    if not text.strip():
+        text = "# paper2code 专用密钥文件（请勿提交）\n"
+
+    found: set = set()
+    out_lines: List[str] = []
+    for line in text.splitlines():
+        m = re.match(r"^(\s*)([A-Za-z_][\w]*)\s*:", line)
+        if m:
+            name = m.group(2)
+            if name in clean:
+                indent = m.group(1)
+                comment = ""
+                rest = line.split(":", 1)[1]
+                hash_at = rest.find(" #")
+                if hash_at >= 0:
+                    comment = rest[hash_at:]
+                out_lines.append(f"{indent}{name}: {_yaml_scalar(clean[name])}{comment}")
+                found.add(name)
+                continue
+        out_lines.append(line)
+    missing = [k for k in clean if k not in found]
+    if missing:
+        if out_lines and out_lines[-1].strip():
+            out_lines.append("")
+        for name in missing:
+            out_lines.append(f"{name}: {_yaml_scalar(clean[name])}")
+    API_KEYS_FILE.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+    return API_KEYS_FILE
+
+
+def _llm_key_source(st: Settings) -> str:
+    if not st.llm_api_key:
+        return ""
+    if os.environ.get("P2C_LLM_API_KEY") or os.environ.get("OPENAI_API_KEY"):
+        return "env"
+    if _file_secret("llm_api_key"):
+        return "file"
+    return "memory"
+
+
+def _tts_key_source(st: Settings) -> str:
+    if not st.tts_api_key:
+        return ""
+    if os.environ.get("P2C_TTS_API_KEY"):
+        return "env"
+    if _file_secret("tts_api_key"):
+        return "file"
+    return "memory"
+
+
 def apply_llm_runtime(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
     mode: Optional[str] = None,
+    persist: bool = False,
 ) -> Settings:
-    """Update live Settings in-process. Does NOT persist secrets to disk.
+    """Update live Settings. Empty strings are ignored.
 
-    Empty strings are ignored. If mode is still offline but a non-empty
-    api_key is present, mode is upgraded to openai (same rule as Settings.load).
+    If persist=True, write non-empty fields into configs/api_keys.yaml so the
+    next restart (and later visits) reuse the key without re-typing.
     """
     st = get_settings()
     if api_key is not None and str(api_key).strip():
@@ -211,6 +336,14 @@ def apply_llm_runtime(
     if st.llm_mode == "offline" and st.llm_api_key and forced_mode != "offline":
         st.llm_mode = "openai"
     set_settings(st)
+    if persist:
+        persist_api_keys(
+            {
+                "llm_api_key": st.llm_api_key,
+                "llm_base_url": st.llm_base_url,
+                "llm_model": st.llm_model,
+            }
+        )
     try:
         from .llm.router import get_provider
 
@@ -223,11 +356,16 @@ def apply_llm_runtime(
 def llm_status(settings: Optional[Settings] = None) -> Dict[str, Any]:
     """Public LLM status — never includes the raw key."""
     st = settings or get_settings()
+    source = _llm_key_source(st)
     return {
         "mode": st.llm_mode,
         "base_url": st.llm_base_url,
         "model": st.llm_model,
         "has_key": bool(st.llm_api_key),
+        "key_hint": _key_hint(st.llm_api_key),
+        "key_source": source,
+        "key_source_label": _SOURCE_LABEL.get(source, ""),
+        "persisted": source == "file",
     }
 
 
@@ -239,13 +377,17 @@ def apply_tts_runtime(
     voice: Optional[str] = None,
     voice_alt: Optional[str] = None,
     mode: Optional[str] = None,
+    persist: bool = False,
 ) -> Settings:
-    """Update live TTS settings in-process. Does NOT persist secrets to disk."""
+    """Update live TTS settings. persist=True writes configs/api_keys.yaml."""
     st = get_settings()
     if api_key is not None and str(api_key).strip():
         st.tts_api_key = str(api_key).strip()
     if base_url is not None and str(base_url).strip():
-        st.tts_base_url = str(base_url).strip().rstrip("/")
+        url = str(base_url).strip().rstrip("/")
+        if url.endswith("/audio/speech"):
+            url = url[: -len("/audio/speech")].rstrip("/")
+        st.tts_base_url = url
     if model is not None and str(model).strip():
         st.tts_model = str(model).strip()
     if provider is not None and str(provider).strip():
@@ -262,6 +404,17 @@ def apply_tts_runtime(
     if st.tts_api_key and st.tts_mode in ("auto", "edge"):
         st.tts_mode = "siliconflow"
     set_settings(st)
+    if persist:
+        persist_api_keys(
+            {
+                "tts_api_key": st.tts_api_key,
+                "tts_base_url": st.tts_base_url,
+                "tts_model": st.tts_model,
+                "tts_provider": st.tts_provider,
+                "tts_voice": st.tts_voice,
+                "tts_voice_alt": st.tts_voice_alt,
+            }
+        )
     try:
         from .tts.base import get_tts
 
@@ -274,6 +427,7 @@ def apply_tts_runtime(
 def tts_status(settings: Optional[Settings] = None) -> Dict[str, Any]:
     """Public TTS status — never includes the raw key."""
     st = settings or get_settings()
+    source = _tts_key_source(st)
     return {
         "provider": st.tts_provider,
         "mode": st.tts_mode,
@@ -281,5 +435,9 @@ def tts_status(settings: Optional[Settings] = None) -> Dict[str, Any]:
         "model": st.tts_model,
         "voice": st.tts_voice,
         "has_key": bool(st.tts_api_key),
+        "key_hint": _key_hint(st.tts_api_key),
+        "key_source": source,
+        "key_source_label": _SOURCE_LABEL.get(source, ""),
+        "persisted": source == "file",
     }
 

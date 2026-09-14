@@ -7,9 +7,17 @@
 
 from __future__ import annotations
 
+import os
 import re
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+# pdfplumber 的表格检测在某些 PDF 上会退化为极慢的 O(n^2) 边缘求交，
+# 足以让同步的 /api/run 请求「看起来卡死 / 上传后不出解析」。
+# 用「页数上限 + 超时」双重护栏兜底，超时则退回启发式抽取，永不阻塞整条链路。
+_PDFPLUMBER_TIMEOUT = float(os.environ.get("P2C_PDFPLUMBER_TIMEOUT", "12") or 12)
+_PDFPLUMBER_MAX_PAGES = int(os.environ.get("P2C_PDFPLUMBER_MAX_PAGES", "40") or 40)
 
 from ..models import CodeRef, Figure, Paper, Table
 from . import extract
@@ -187,7 +195,38 @@ def _looks_like_garbage_table(header: List[str], rows: List[List[str]]) -> bool:
     return numericish >= max(3, int(0.7 * len(cells)))
 
 
-def _extract_tables_pdfplumber(path: Path) -> List[Table]:
+def _extract_tables_pdfplumber(path: Path, warnings: Optional[List[str]] = None) -> List[Table]:
+    """Run pdfplumber table extraction under a timeout guard.
+
+    On timeout the (pure-Python) worker thread is abandoned as a daemon and we
+    return an empty list, so the caller can fall back to the heuristic extractor
+    instead of hanging the whole request.
+    """
+    result: Dict[str, Any] = {"tables": [], "done": False}
+
+    def _work() -> None:
+        try:
+            result["tables"] = _extract_tables_pdfplumber_core(path)
+        except Exception:
+            result["tables"] = []
+        finally:
+            result["done"] = True
+
+    worker = threading.Thread(target=_work, name="pdfplumber-tables", daemon=True)
+    worker.start()
+    worker.join(_PDFPLUMBER_TIMEOUT)
+    if not result["done"]:
+        msg = (
+            f"pdfplumber 表格抽取超过 {_PDFPLUMBER_TIMEOUT:.0f}s，已跳过并改用启发式抽取"
+            "（可用环境变量 P2C_PDFPLUMBER_TIMEOUT 调整）"
+        )
+        if warnings is not None:
+            warnings.append(msg)
+        return []
+    return result["tables"]  # type: ignore[return-value]
+
+
+def _extract_tables_pdfplumber_core(path: Path) -> List[Table]:
     try:
         import pdfplumber  # type: ignore
     except Exception:
@@ -196,7 +235,7 @@ def _extract_tables_pdfplumber(path: Path) -> List[Table]:
     out: List[Table] = []
     try:
         with pdfplumber.open(str(path)) as pdf:
-            for page in pdf.pages:
+            for page in pdf.pages[:_PDFPLUMBER_MAX_PAGES]:
                 for raw in page.extract_tables() or []:
                     rows = [[(c or "").replace("\n", " ").strip() for c in r] for r in raw if r]
                     rows = [r for r in rows if any(c for c in r)]
@@ -288,7 +327,7 @@ def _parse_pdf_pymupdf(path: Path, paper_id: str) -> Paper:
         paper.sections = academic
 
     cap_tables = extract.extract_captioned_tables(lines)
-    plumber = _extract_tables_pdfplumber(path)
+    plumber = _extract_tables_pdfplumber(path, warnings=warnings)
     if not plumber:
         plumber = _extract_tables_heuristic(lines)
     if cap_tables:

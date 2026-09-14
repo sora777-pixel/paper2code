@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Where Does the Cache Hit Ratio Go? · 课件</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f5f7fb; --card:#ffffff; --ink:#1b2130; --muted:#5d6b85;
+  --line:#e3e8f2; --brand:#4f6bed; --brand2:#8b5cf6; --accent:#0ea5a4;
+  --warn:#d97706; --fail:#dc2626; --pass:#16a34a;
+  --radius:18px; --shadow:0 10px 30px rgba(24,39,75,.10);
+}
+html,body{height:100%}
+body{
+  background:radial-gradient(1100px 620px at 12% -8%,#e8edff 0%,transparent 60%),
+             radial-gradient(900px 520px at 108% 4%,#eafaf7 0%,transparent 55%),
+             var(--bg);
+  color:var(--ink);
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.deck{max-width:1120px;margin:0 auto;padding:28px 20px 76px}
+.slide{
+  display:none;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--radius);box-shadow:var(--shadow);
+  padding:28px 40px 28px;min-height:0;height:calc(100vh - 96px);max-height:calc(100vh - 96px);
+  position:relative;overflow:hidden;flex-direction:column;
+}
+.slide-body{
+  flex:1 1 auto;min-height:0;overflow:auto;padding-right:4px;
+  -webkit-overflow-scrolling:touch;
+}
+.slide.active{display:flex;flex-direction:column;animation:in .32s cubic-bezier(.2,.7,.3,1)}
+@keyframes in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.slide::after{
+  content:"";position:absolute;inset:0 0 auto 0;height:5px;
+  background:linear-gradient(90deg,var(--brand),var(--brand2),var(--accent));
+}
+.kicker{font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--brand);font-weight:700;margin-bottom:10px}
+h1{font-size:40px;line-height:1.25;letter-spacing:-.02em;font-weight:800}
+h2{font-size:27px;line-height:1.3;letter-spacing:-.01em;font-weight:750;margin-bottom:6px}
+h2+.rule{height:3px;width:64px;border-radius:3px;background:linear-gradient(90deg,var(--brand),var(--brand2));margin:14px 0 24px}
+.sub{color:var(--muted);font-size:15.5px;margin-top:14px}
+ul.bullets{list-style:none;display:grid;gap:13px;margin-top:6px}
+ul.bullets li{
+  position:relative;padding:14px 18px 14px 44px;background:#f8faff;
+  border:1px solid var(--line);border-radius:12px;font-size:16.2px;
+}
+ul.bullets li::before{
+  content:"";position:absolute;left:18px;top:22px;width:9px;height:9px;border-radius:50%;
+  background:linear-gradient(135deg,var(--brand),var(--brand2));
+}
+.slide.title-slide{display:none;background:linear-gradient(135deg,#3b4fd8 0%,#6d4de0 46%,#0e9f9a 100%);color:#fff;border:none;height:calc(100vh - 96px);max-height:calc(100vh - 96px);overflow:hidden}
+.slide.title-slide.active{display:flex;flex-direction:column}
+.slide.title-slide::after{display:none}
+.slide.title-slide .slide-body{
+  display:flex;flex-direction:column;justify-content:center;gap:4px;
+  overflow:hidden;height:100%;max-height:100%;padding-right:0;
+}
+.slide.title-slide .kicker{color:rgba(255,255,255,.85);margin-bottom:14px}
+.slide.title-slide h1{
+  font-size:clamp(22px, 3.2vw, 34px);line-height:1.28;letter-spacing:-.02em;
+  overflow-wrap:anywhere;word-break:break-word;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;
+}
+.slide.title-slide .title-meta{
+  margin-top:14px;font-size:16px;font-weight:600;opacity:.92;
+  overflow-wrap:anywhere;word-break:break-word;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
+}
+.slide.title-slide .title-lead{
+  margin-top:16px;font-size:16.5px;line-height:1.55;max-width:38em;opacity:.95;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;
+}
+.slide.title-slide .sub{
+  color:rgba(255,255,255,.86);margin-top:18px;font-size:14px;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
+}
+.slide.title-slide ul.bullets,.slide.title-slide ul.bullets li{display:none!important}
+.takeaway .pill{margin-right:8px}
+.takeaway h3{font-size:15.5px;font-weight:750;color:#39457a;margin:14px 0 8px}
+.agenda{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:8px}
+.agenda .item{
+  background:#f8faff;border:1px solid var(--line);border-radius:12px;padding:13px 16px;font-size:15.4px;
+  display:flex;gap:12px;align-items:flex-start;
+}
+.agenda .num{
+  flex:0 0 26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:13px;font-weight:700;
+  color:#fff;background:linear-gradient(135deg,var(--brand),var(--brand2));
+}
+table.data{border-collapse:collapse;width:100%;font-size:14.4px;margin-top:8px;border-radius:12px;overflow:hidden}
+table.data th,table.data td{border-bottom:1px solid var(--line);padding:9px 12px;text-align:left}
+table.data th{background:#eef2ff;font-weight:700;color:#39457a;white-space:nowrap}
+table.data tr:nth-child(even) td{background:#fafbff}
+table.data td.num{text-align:right;font-variant-numeric:tabular-nums}
+.caption{font-size:13.6px;color:var(--muted);margin-top:12px;padding-left:12px;border-left:3px solid var(--line)}
+figure{margin:16px 0 0;text-align:center}
+figure img{max-width:100%;max-height:min(55vh,420px);object-fit:contain;border-radius:12px;border:1px solid var(--line)}
+.notes{
+  margin-top:24px;padding:15px 18px;background:linear-gradient(180deg,#fffdf5,#fff9e8);
+  border:1px dashed #ecd9a6;border-radius:12px;font-size:14.6px;color:#6b5a2c;
+}
+.notes b{color:#a06a12}
+.pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:700;background:#eef2ff;color:#3d4ea8;margin-right:6px}
+.takeaway ul.bullets li::before{background:linear-gradient(135deg,var(--accent),#22c55e)}
+.eq{margin:18px 0 8px;padding:16px 18px;background:#f4f6ff;border:1px solid #d9e0f5;border-radius:12px;font:16px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap;overflow-x:auto}
+.bar{position:fixed;left:0;right:0;bottom:0;background:rgba(255,255,255,.92);border-top:1px solid var(--line);backdrop-filter:blur(8px)}
+.bar-inner{max-width:1120px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:16px}
+.bar button{
+  border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:10px;
+  padding:8px 16px;font-size:14.5px;font-weight:600;cursor:pointer;transition:.15s;
+}
+.bar button:hover{border-color:var(--brand);color:var(--brand);transform:translateY(-1px)}
+.bar button:disabled{opacity:.4;cursor:not-allowed}
+.track{flex:1;height:7px;background:#e7ebf5;border-radius:99px;overflow:hidden}
+.fill{height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--brand2));transition:width .25s}
+.count{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:64px;text-align:right}
+.zone{position:fixed;top:0;bottom:52px;width:22%;cursor:pointer;z-index:5}
+.zone.left{left:0}.zone.right{right:0}
+.hint{position:fixed;bottom:64px;right:22px;font-size:12.5px;color:var(--muted);background:rgba(255,255,255,.9);border:1px solid var(--line);padding:6px 12px;border-radius:99px}
+
+.table-wrap{position:relative;margin-top:8px;max-width:100%}
+.table-scroll{
+  max-width:100%;max-height:min(42vh,380px);overflow-x:auto;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  border:1px solid var(--line);border-radius:12px;background:#fff;
+  scrollbar-width:thin;scrollbar-color:var(--brand2) #eef2ff;
+}
+.table-scroll::-webkit-scrollbar{height:10px}
+.table-scroll::-webkit-scrollbar-track{background:#eef2ff;border-radius:0 0 12px 12px}
+.table-scroll::-webkit-scrollbar-thumb{
+  background:linear-gradient(90deg,var(--brand),var(--brand2));border-radius:99px;
+}
+table.data{
+  border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;
+  font-size:14.4px;margin:0;border-radius:0;overflow:visible;
+}
+table.data th,table.data td{
+  border-bottom:1px solid var(--line);padding:9px 12px;text-align:left;
+  white-space:nowrap;vertical-align:middle;
+}
+table.data th{background:#eef2ff;font-weight:700;color:#39457a}
+table.data tr:nth-child(even) td{background:#fafbff}
+table.data td.num{text-align:right;font-variant-numeric:tabular-nums}
+table.data th:first-child,table.data td:first-child{
+  position:sticky;left:0;z-index:2;background:#eef2ff;
+  box-shadow:2px 0 0 var(--line);
+}
+table.data tr:nth-child(even) td:first-child{background:#f3f6ff}
+table.data tbody tr:hover td{background:#f0f4ff}
+table.data tbody tr:hover td:first-child{background:#e8edff}
+figure{margin:16px 0 0;text-align:center;position:relative}
+figure img{
+  max-width:100%;max-height:min(55vh,420px);width:auto;height:auto;object-fit:contain;
+  border-radius:12px;border:1px solid var(--line);cursor:zoom-in;display:block;margin:0 auto;
+}
+.zoomable{cursor:zoom-in}
+.zoomable:hover .zoom-hint,.table-wrap:hover .zoom-hint{opacity:1}
+.zoom-hint{
+  position:absolute;top:10px;right:10px;z-index:3;opacity:0;transition:opacity .15s;
+  border:none;cursor:pointer;pointer-events:none;
+  padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;
+  color:#fff;background:linear-gradient(135deg,var(--brand),var(--brand2));
+  box-shadow:0 4px 12px rgba(79,107,237,.35);
+}
+.table-wrap .zoom-hint{pointer-events:auto;cursor:pointer}
+.bar{z-index:20}
+.hint{z-index:20}
+.lightbox{
+  display:none;position:fixed;inset:0;z-index:1000;
+  background:rgba(20,24,40,.78);backdrop-filter:blur(6px);
+  padding:28px 20px 40px;align-items:center;justify-content:center;
+}
+.lightbox.open{display:flex}
+.lightbox-inner{
+  position:relative;max-width:min(96vw,1400px);max-height:90vh;width:100%;
+  background:var(--card);border-radius:16px;border:1px solid rgba(255,255,255,.2);
+  box-shadow:0 24px 64px rgba(0,0,0,.35);overflow:auto;padding:18px;
+}
+.lightbox-inner img{
+  display:block;max-width:100%;max-height:calc(90vh - 48px);width:auto;height:auto;
+  object-fit:contain;margin:0 auto;border-radius:8px;
+}
+.lightbox-inner .table-scroll{max-height:calc(90vh - 48px);overflow:auto;border-radius:12px}
+.lightbox-inner table.data{font-size:15px}
+.lightbox-close{
+  position:fixed;top:16px;right:18px;z-index:1001;
+  width:40px;height:40px;border-radius:50%;border:none;cursor:pointer;
+  font-size:22px;line-height:1;color:#fff;
+  background:linear-gradient(135deg,var(--brand),var(--brand2));
+  box-shadow:0 6px 18px rgba(79,107,237,.45);
+}
+.lightbox-caption{margin-top:12px;text-align:center;color:var(--muted);font-size:13.5px}
+body.lb-open .zone,body.lb-open .hint{pointer-events:none}
+
+@media print{
+  body{background:#fff}
+  .slide,.slide.title-slide{display:block!important;page-break-after:always;box-shadow:none;margin-bottom:16px;min-height:auto;height:auto;max-height:none;overflow:visible}
+  .bar,.zone,.hint,.lightbox,.zoom-hint{display:none!important}
+  .table-scroll{overflow:visible!important;border:none}
+  .slide.title-slide{color:#fff}
+}
+@media (max-width:720px){
+  .slide{padding:26px 20px;min-height:auto}
+  h1{font-size:28px}h2{font-size:21px}
+  ul.bullets li{font-size:15px}
+}
+</style>
+</head>
+<body>
+<div class="deck"><section class="slide title-slide"><div class="slide-body"><div class="kicker">Paper2Code · 论文精讲</div><h1>Where Does the Cache Hit Ratio Go?</h1><p class="title-meta">Lian Zhou, Ruoxi Feng, Kaiyuan Wang</p><p class="title-lead">Edge content delivery networks report aggregate cache hit ratios as their primary efficiency metric…</p><p class="sub">自动生成（provider: relayout）· 共 17 页 · 使用 ← → 翻页，打印可导出 PDF</p></div></section><section class="slide"><div class="slide-body"><div class="kicker">Agenda</div><h2>本次讲解路线</h2><div class='rule'></div><div class="agenda"><div class="item"><span class="num">1</span><span>问题开场：命中率为何对不上？</span></div><div class="item"><span class="num">2</span><span>背景铺垫：CDN 与边缘缓存</span></div><div class="item"><span class="num">3</span><span>核心矛盾：请求命中 vs 字节命中</span></div><div class="item"><span class="num">4</span><span>测量部署：6321 万次请求</span></div><div class="item"><span class="num">5</span><span>工作负载画像：按内容类别拆分</span></div><div class="item"><span class="num">6</span><span>关键样本：静态资源的双面占比</span></div><div class="item"><span class="num">7</span><span>指标定义：请求份额、字节份额与命中率</span></div><div class="item"><span class="num">8</span><span>方法总览：采集、分类、统计</span></div><div class="item"><span class="num">9</span><span>证据一：静态资源请求命中率 0.94</span></div><div class="item"><span class="num">10</span><span>证据二：字节命中率 0.91 与字节份额 12.1%</span></div><div class="item"><span class="num">11</span><span>解释机制：命中率被谁“吃掉”了</span></div><div class="item"><span class="num">12</span><span>结果讨论：总命中率的误导性</span></div><div class="item"><span class="num">13</span><span>局限与偏差：部署、分类与时间窗</span></div><div class="item"><span class="num">14</span><span>复现路径：从数据到结论与开放问题</span></div></div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 3 页 / 共 17 页</div><h2>问题开场：命中率为何对不上？</h2><div class='rule'></div><ul class="bullets"><li>论文标题提出缓存命中率去向问题</li><li>表 T2 汇总总请求数 63,214,880</li><li>表 T1 列出请求命中率与字节命中率</li><li>大纲关注命中率对不上的疑问</li></ul><div class="notes"><b>讲解提示：</b>开场从论文标题 Where Does the Cache Hit Ratio Go? 切入：命中率看起来是一个数，但请求口径与字节口径可能不一致。T2 给出总请求 63,214,880，T1 给出静态资源的请求命中率与字节命中率，为后续拆解做铺垫。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 4 页 / 共 17 页</div><h2>背景铺垫：CDN 与边缘缓存</h2><div class='rule'></div><ul class="bullets"><li>论文标题关注缓存命中率</li><li>大纲背景涉及 CDN 与边缘缓存</li><li>工作负载含 Static assets 类别</li><li>表 T1 区分请求与字节指标</li></ul><div class="notes"><b>讲解提示：</b>背景：CDN 边缘缓存常以命中率衡量效果。给定材料中，T1 将指标拆成请求命中率与字节命中率，工作负载还出现 Static assets 类别，为后面核心矛盾铺垫。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 5 页 / 共 17 页</div><h2>核心矛盾：请求命中 vs 字节命中</h2><div class='rule'></div><ul class="bullets"><li>表 T1 同时报告两类命中率</li><li>静态资源请求命中率 0.94</li><li>静态资源字节命中率 0.91</li><li>两类命中率可能给出不同信号</li></ul><div class="notes"><b>讲解提示：</b>核心矛盾是请求命中率和字节命中率。T1 对 Static assets 同时列出 0.94 与 0.91，说明按请求和按字节统计可能产生不同结论。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 6 页 / 共 17 页</div><h2>测量部署：6321 万次请求</h2><div class='rule'></div><ul class="bullets"><li>表 T2 总请求数 63,214,880</li><li>部署覆盖整个测量窗口</li><li>数据来自一次测量部署汇总</li><li>总请求约 6321 万次</li></ul><div class="notes"><b>讲解提示：</b>测量部署汇总见表 T2：总请求 63,214,880，约 6321 万次。该数字用于说明工作负载规模，并作为后续统计基准。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 7 页 / 共 17 页</div><h2>工作负载画像：按内容类别拆分</h2><div class='rule'></div><ul class="bullets"><li>表 T1 按内容类别报告组成</li><li>表中列出 Static assets 类别</li><li>报告请求份额与字节份额</li><li>报告请求命中率与字节命中率</li></ul><div class="notes"><b>讲解提示：</b>T1 按内容类别拆分工作负载，列出请求份额、字节份额、请求命中率和字节命中率。给定表只展示 Static assets 行，因此这里不扩展其他类别。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 8 页 / 共 17 页</div><h2>关键样本：静态资源的双面占比</h2><div class='rule'></div><ul class="bullets"><li>Static assets 请求份额 46.8%</li><li>Static assets 字节份额 12.1%</li><li>请求份额高而字节份额低</li><li>同一类别呈现双面占比</li></ul><div class="notes"><b>讲解提示：</b>静态资源是关键样本：请求份额 46.8%，字节份额 12.1%。请求多但字节少，说明它在请求口径中权重大，在字节口径中权重小。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 9 页 / 共 17 页</div><h2>指标定义：请求份额、字节份额与命中率</h2><div class='rule'></div><ul class="bullets"><li>表 T1 含请求份额、字节份额</li><li>表 T1 含请求命中率、字节命中率</li><li>请求命中率与字节命中率并列</li><li>指标从不同维度刻画缓存</li></ul><div class="notes"><b>讲解提示：</b>指标定义来自 T1 表头。请求份额和字节份额描述组成，请求命中率和字节命中率描述效果；两者并列，提示不能只看单一总命中率。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 10 页 / 共 17 页</div><h2>方法总览：采集、分类、统计</h2><div class='rule'></div><ul class="bullets"><li>表 T2 汇总总请求数</li><li>表 T1 按内容类别分类</li><li>统计包含请求与字节指标</li><li>工作负载分为内容类别</li></ul><div class="notes"><b>讲解提示：</b>方法可概括为采集部署数据、按内容类别分类、统计请求与字节指标。T2 提供总请求数，T1 提供分类后的份额与命中率。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 11 页 / 共 17 页</div><h2>证据一：静态资源请求命中率 0.94</h2><div class='rule'></div><ul class="bullets"><li>表 T1 显示静态资源请求命中率 0.94</li><li>请求命中率接近 94%</li><li>按请求口径缓存效果很高</li><li>该值来自 Static assets 类别</li></ul><div class="notes"><b>讲解提示：</b>证据一：Static assets 的请求命中率为 0.94，即约 94% 的请求命中。单看请求口径，缓存表现很好，容易得出高命中结论。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 12 页 / 共 17 页</div><h2>证据二：字节命中率 0.91 与字节份额 12.1%</h2><div class='rule'></div><ul class="bullets"><li>表 T1 显示静态资源字节命中率 0.91</li><li>字节命中率约 91%</li><li>静态资源字节份额 12.1%</li><li>请求高命中但字节份额低</li></ul><div class="notes"><b>讲解提示：</b>证据二：Static assets 的字节命中率 0.91，字节份额 12.1%。与请求命中率 0.94 相比略低，且字节占比小，影响总命中率权重。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 13 页 / 共 17 页</div><h2>解释机制：命中率被谁“吃掉”了</h2><div class='rule'></div><ul class="bullets"><li>请求命中率与字节命中率口径不同</li><li>静态资源请求份额 46.8%</li><li>静态资源字节份额 12.1%</li><li>权重差异会影响总命中率</li></ul><div class="notes"><b>讲解提示：</b>解释机制：请求命中率按请求加权，字节命中率按字节加权。Static assets 请求份额 46.8%，字节份额 12.1%，权重不同会改变总命中率的呈现。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 14 页 / 共 17 页</div><h2>结果讨论：总命中率的误导性</h2><div class='rule'></div><ul class="bullets"><li>总命中率可能掩盖请求与字节差异</li><li>静态资源请求命中率 0.94</li><li>静态资源字节命中率 0.91</li><li>需同时报告请求与字节口径</li></ul><div class="notes"><b>讲解提示：</b>讨论：如果只给一个总命中率，可能掩盖请求口径与字节口径的差异。T1 中 0.94 与 0.91 并存，说明应同时报告请求和字节命中率。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 15 页 / 共 17 页</div><h2>局限与偏差：部署、分类与时间窗</h2><div class='rule'></div><ul class="bullets"><li>测量来自单一部署汇总</li><li>总请求数 63,214,880</li><li>工作负载按内容类别分类</li><li>表 T1 仅展示 Static assets 行</li></ul><div class="notes"><b>讲解提示：</b>局限：结果基于该测量部署，T2 总请求 63,214,880；分类依赖内容类别，给定 T1 仅展示 Static assets 行；统计覆盖整个测量窗口。</div></div></section><section class="slide"><div class="slide-body"><div class="kicker">第 16 页 / 共 17 页</div><h2>复现路径：从数据到结论与开放问题</h2><div class='rule'></div><ul class="bullets"><li>从表 T2 获取总请求数</li><li>从表 T1 获取类别指标</li><li>对比请求命中率与字节命中率</li><li>开放问题：命中率去向何处</li></ul><div class="notes"><b>讲解提示：</b>复现路径：用 T2 的总请求数与 T1 的分类指标，对比请求命中率和字节命中率。开放问题回到标题：命中率到底去了哪里，以及如何报告才不误导。</div></div></section><section class="slide takeaway"><div class="slide-body"><div class="kicker">第 17 页 / 共 17 页</div><h2>结论、展望与不足</h2><div class='rule'></div><ul class="bullets"><li><span class="pill">结论</span>Aggregate cache hit ratio is an ambiguous metric</li><li><span class="pill">结论</span>Decomposing it by content class reveals that byte-level and request-level accounting can differ by more than twenty percentage points in a realistic edge deployment…</li><li><span class="pill">展望</span>We recommend reporting both metrics side by side…</li><li><span class="pill">展望</span>Operators who monitor only request-level hit ratios will under-provision origin bandwidth whenever video share grows…</li><li><span class="pill">不足</span>Raw request logs cannot be released because they contain tenant-identifying fields</li></ul></div></section></div>
+<div class="zone left"></div><div class="zone right"></div>
+<div class="hint">← → 翻页 · 点击图表可放大</div>
+<div class="bar"><div class="bar-inner">
+  <button id="prev">上一页</button>
+  <div class="track"><div class="fill" id="fill"></div></div>
+  <span class="count"><b id="cur">1</b> / <span id="total">-</span></span>
+  <button id="next">下一页</button>
+</div></div>
+<div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="放大预览">
+  <button type="button" id="lightbox-close" class="lightbox-close" title="关闭" aria-label="关闭">×</button>
+  <div class="lightbox-inner">
+    <div id="lightbox-body"></div>
+    <div id="lightbox-caption" class="lightbox-caption"></div>
+  </div>
+</div>
+<script>
+(function(){
+  var slides=[].slice.call(document.querySelectorAll('.slide'));
+  var i=0;
+  var fill=document.getElementById('fill');
+  var cur=document.getElementById('cur');
+  var total=document.getElementById('total');
+  var prev=document.getElementById('prev');
+  var next=document.getElementById('next');
+  var lb=document.getElementById('lightbox');
+  var lbBody=document.getElementById('lightbox-body');
+  var lbCap=document.getElementById('lightbox-caption');
+  var lbClose=document.getElementById('lightbox-close');
+  if(total) total.textContent=slides.length;
+  function show(k){
+    if(document.body.classList.contains('lb-open')) return;
+    if(k<0||k>=slides.length) return;
+    slides[i].classList.remove('active');
+    i=k;
+    slides[i].classList.add('active');
+    if(cur) cur.textContent=(i+1);
+    if(fill) fill.style.width=((i+1)/slides.length*100)+'%';
+    if(prev) prev.disabled=(i===0);
+    if(next) next.disabled=(i===slides.length-1);
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  function openLightbox(html, caption){
+    if(!lb||!lbBody) return;
+    lbBody.innerHTML=html;
+    if(lbCap) lbCap.textContent=caption||'点击背景或按 Esc 关闭';
+    lb.classList.add('open');
+    document.body.classList.add('lb-open');
+  }
+  function closeLightbox(){
+    if(!lb||!lbBody) return;
+    lb.classList.remove('open');
+    document.body.classList.remove('lb-open');
+    lbBody.innerHTML='';
+  }
+  if(prev) prev.onclick=function(){show(i-1)};
+  if(next) next.onclick=function(){show(i+1)};
+  document.querySelector('.zone.left').onclick=function(){show(i-1)};
+  document.querySelector('.zone.right').onclick=function(){show(i+1)};
+  document.addEventListener('keydown',function(e){
+    if(document.body.classList.contains('lb-open')){
+      if(e.key==='Escape'){e.preventDefault();closeLightbox()}
+      return;
+    }
+    if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){e.preventDefault();show(i+1)}
+    if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();show(i-1)}
+    if(e.key==='Home')show(0);
+    if(e.key==='End')show(slides.length-1);
+  });
+  document.addEventListener('click',function(e){
+    var t=e.target;
+    if(!t) return;
+    if(t.closest && t.closest('#lightbox-close')){closeLightbox();return}
+    if(lb && lb.classList.contains('open') && t===lb){closeLightbox();return}
+    var img = t.closest ? t.closest('figure img') : null;
+    if(img && !document.body.classList.contains('lb-open')){
+      e.preventDefault(); e.stopPropagation();
+      var fig = img.closest('figure');
+      var capEl = fig ? fig.querySelector('figcaption') : null;
+      var cap = (capEl && capEl.textContent) || img.getAttribute('alt') || '';
+      openLightbox('<img src="'+img.getAttribute('src')+'" alt=""/>', cap);
+      return;
+    }
+    var wrap = t.closest ? t.closest('.table-wrap.zoomable') : null;
+    if(wrap && !document.body.classList.contains('lb-open')){
+      e.preventDefault(); e.stopPropagation();
+      var scroll = wrap.querySelector('.table-scroll');
+      if(!scroll) return;
+      openLightbox(scroll.cloneNode(true).outerHTML, '宽表放大 · 可横向/纵向滚动');
+    }
+  }, true);
+  if(lbClose) lbClose.onclick=function(e){e.stopPropagation();closeLightbox()};
+  var m=/[?&]p=(\d+)/.exec(location.search);
+  show(m?Math.max(0,Math.min(slides.length-1,parseInt(m[1],10)-1)):0);
+})();
+</script>
+</body>
+</html>

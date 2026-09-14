@@ -192,16 +192,34 @@ def write_manifest(manifest: RepoManifest, out_dir: Path, extra: Optional[Dict[s
 
 
 # --------------------------------------------------------------------------- #
-def try_clone(url: str, dest: Path, timeout: int = 180) -> Dict[str, Any]:
-    """尝试浅克隆。失败不抛出，返回带 ``ok=False`` 的结果供报告说明。"""
+def try_clone(url: str, dest: Path, timeout: int = 45) -> Dict[str, Any]:
+    """尝试浅克隆。失败不抛出，返回带 ``ok=False`` 的结果供报告说明。
+
+    默认 ``allow_network=false`` 时直接跳过，避免 Web 上传后 ``git clone``
+    卡在凭据提示或慢网上，导致「解析一直转圈」。
+    """
+    try:
+        from ..config import get_settings
+
+        if not get_settings().allow_network:
+            return {
+                "ok": False,
+                "error": "allow_network=false，跳过自动克隆；请把仓库放到论文包 code/ 目录，或在配置中打开网络",
+            }
+    except Exception:
+        pass
     if shutil.which("git") is None:
         return {"ok": False, "error": "系统未安装 git，无法自动克隆；请手工下载仓库后放入论文包的 code/ 目录"}
     if dest.exists() and any(dest.iterdir()):
         return {"ok": True, "path": str(dest), "note": "目标目录已存在，跳过克隆"}
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GCM_INTERACTIVE"] = "never"
     try:
         proc = subprocess.run(  # noqa: S603
             ["git", "clone", "--depth", "1", url, str(dest)],
             capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace",
+            env=env,
         )
         if proc.returncode == 0:
             return {"ok": True, "path": str(dest)}

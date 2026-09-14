@@ -1,0 +1,55 @@
+{
+  "paper_id": "ui_click_test",
+  "mode": "no_code",
+  "ok": true,
+  "generated": [
+    "E:\\chatgpt-ai-demo\\paper2code\\paper2code\\outputs\\ui_click_test\\reproduce\\repro_plan.json",
+    "E:\\chatgpt-ai-demo\\paper2code\\paper2code\\outputs\\ui_click_test\\reproduce\\repro_report.md",
+    "E:\\chatgpt-ai-demo\\paper2code\\paper2code\\outputs\\ui_click_test\\reproduce\\repro_report.html"
+  ],
+  "table_csv": {},
+  "figure_files": [],
+  "deltas": [],
+  "summary": {
+    "mode": "no_code",
+    "mode_label": "情形 B · 无任何代码",
+    "mode_decision": {
+      "mode": "no_code",
+      "confidence": 0.7,
+      "reason": "无代码、无伪代码，只能依据正文与表格数据重建",
+      "evidence": [
+        "未发现代码链接，也未识别出伪代码算法块",
+        "可用输入：论文中的 2 张表格 + 附带数据文件"
+      ]
+    },
+    "datasets": {},
+    "checks": {
+      "total": 0,
+      "pass": 0,
+      "warn": 0,
+      "fail": 0,
+      "skipped": 0,
+      "score": 0.0,
+      "verdict": "not_verifiable"
+    },
+    "deltas_summary": {
+      "n_judged": 0,
+      "pass_rate": null,
+      "median_rel_delta": null,
+      "max_rel_delta": null
+    },
+    "figures_redrawn": 0,
+    "missing_elements": [
+      "数据集/数据来源",
+      "超参数与训练配置",
+      "随机种子/重复次数",
+      "预处理与分词细节",
+      "硬件与运行环境"
+    ]
+  },
+  "stdout": "",
+  "warnings": [
+    "以下要素在论文中未明确披露，无法复现：数据集/数据来源、超参数与训练配置、随机种子/重复次数、预处理与分词细节、硬件与运行环境。已列入报告，供人工补齐后二次复现。"
+  ],
+  "report_path": "E:\\chatgpt-ai-demo\\paper2code\\paper2code\\outputs\\ui_click_test\\reproduce\\repro_report.md"
+}

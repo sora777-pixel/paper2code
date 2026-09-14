@@ -18,7 +18,12 @@ DEFAULT_DOCLING_PYTHON = Path(
     r"C:\Users\lenovo\paper2code-xfer\pdf-bakeoff\.venv\Scripts\python.exe"
 )
 CONVERT_HELPER = Path(__file__).resolve().parent / "_docling_convert.py"
-TIMEOUT_SEC = 15 * 60
+# Docling 走 torch 子进程，首启很慢甚至可能卡住（曾让 /api/run 假死 15 分钟）。
+# Web 上传默认给 90s，超时后 parse_pdf 回退 PyMuPDF，保证仍能生成课件。
+try:
+    TIMEOUT_SEC = int(os.environ.get("P2C_DOCLING_TIMEOUT", "90") or 90)
+except ValueError:
+    TIMEOUT_SEC = 90
 
 
 def resolve_docling_python(python_exe: str | None = None) -> Optional[Path]:
@@ -144,8 +149,14 @@ def convert_pdf_to_markdown(
 
 
 def default_pdf_backend() -> str:
-    """``hybrid`` when Docling python exists, else ``pymupdf``."""
+    """PDF 解析后端默认值。
+
+    默认使用零依赖、稳定快速的 ``pymupdf``。``docling`` / ``hybrid`` 会 shell
+    到 bakeoff venv 跑 torch，首启慢、可能卡住（曾导致 Web 上传后长时间无响应，
+    Docling 子进程超时上限达 15 分钟），因此只在显式设置 ``P2C_PDF_BACKEND``
+    （或 CLI ``--pdf-backend``）时才启用，绝不作为默认上传路径。
+    """
     env = (os.environ.get("P2C_PDF_BACKEND") or "").strip().lower()
     if env in ("hybrid", "docling", "pymupdf"):
         return env
-    return "hybrid" if resolve_docling_python() is not None else "pymupdf"
+    return "pymupdf"

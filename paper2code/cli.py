@@ -135,6 +135,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         except ImportError:
             print("需要安装 Web 依赖：pip install fastapi uvicorn", file=sys.stderr)
             return 2
+        import os as _os
+        from .ingest.docling_backend import default_pdf_backend
+
+        # Web 上传必须秒级返回：未显式指定时强制 pymupdf，避免 Docling hybrid 假死。
+        if not (_os.environ.get("P2C_PDF_BACKEND") or "").strip():
+            _os.environ["P2C_PDF_BACKEND"] = "pymupdf"
+        st = get_settings()
+        print(
+            f"paper2code serve  http://{args.host}:{args.port}\n"
+            f"  PDF backend : {default_pdf_backend()}\n"
+            f"  LLM         : {st.llm_mode} / {st.llm_model}  key={'yes' if st.llm_api_key else 'no（offline 仍可生成课件）'}\n"
+            f"  API keys    : {st.workspace / 'configs' / 'api_keys.yaml'}",
+            flush=True,
+        )
         uvicorn.run("paper2code.api:app", host=args.host, port=args.port, reload=args.reload)
         return 0
 

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>复现报告 · Where Does the Cache Hit Ratio Go?</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#f5f7fb;--card:#fff;--ink:#1b2130;--muted:#5d6b85;--line:#e3e8f2;
+--brand:#4f6bed;--brand2:#8b5cf6;--accent:#0ea5a4;}
+body{background:radial-gradient(1000px 560px at 6% -10%,#e8edff,transparent 60%),
+radial-gradient(820px 460px at 104% 0%,#eafaf7,transparent 55%),var(--bg);
+color:var(--ink);font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+padding:32px 20px 80px}
+.wrap{max-width:1100px;margin:0 auto}
+.hero{background:linear-gradient(135deg,#3b4fd8 0%,#6d4de0 48%,#0e9f9a 100%);color:#fff;
+border-radius:20px;padding:34px 38px;margin-bottom:22px;box-shadow:0 14px 40px rgba(59,79,216,.24)}
+.hero .kicker{font-size:12.5px;letter-spacing:.18em;text-transform:uppercase;opacity:.86;font-weight:700}
+.hero h1{font-size:30px;line-height:1.3;font-weight:800;margin:10px 0 14px;letter-spacing:-.02em}
+.hero .pills{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.hero .pill{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);
+border-radius:999px;padding:5px 14px;font-size:13px;font-weight:650}
+.hero .reason{opacity:.92;font-size:14px;margin-top:16px;max-width:860px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px 28px;
+box-shadow:0 8px 26px rgba(24,39,75,.07);margin-bottom:18px}
+.card h2{font-size:20px;font-weight:750;margin-bottom:14px;display:flex;align-items:center;gap:10px}
+.card h2::before{content:"";width:5px;height:20px;border-radius:3px;
+background:linear-gradient(180deg,var(--brand),var(--brand2))}
+.card h3{font-size:16.5px;font-weight:700;color:#39457a;margin:18px 0 8px}
+table{border-collapse:collapse;width:100%;font-size:13.8px}
+th,td{border-bottom:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+th{background:#eef2ff;font-weight:700;color:#39457a;white-space:nowrap}
+tr:nth-child(even) td{background:#fafbff}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+.grid2{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.gallery{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}
+.shot{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff}
+.shot img{display:block;width:100%;height:auto;background:#fff}
+.shot .cap{padding:10px 14px;font-size:12.8px;color:var(--muted);border-top:1px solid var(--line)}
+.strategy{background:#f8faff;border:1px solid var(--line);border-left:4px solid var(--brand);
+border-radius:0 12px 12px 0;padding:16px 20px;white-space:pre-wrap;font-size:14.5px}
+ol.steps{margin:10px 0 0 22px}ol.steps li{margin:5px 0;font-size:14.4px}
+ul.notes{margin:8px 0 0 22px}ul.notes li{margin:4px 0;font-size:14.2px;color:#6b5a2c}
+.warnbox{background:linear-gradient(180deg,#fffdf5,#fff9e8);border:1px dashed #ecd9a6;
+border-radius:12px;padding:14px 18px;font-size:14.2px;color:#6b5a2c}
+.muted{color:var(--muted);font-size:13.6px}
+.kpi{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:4px}
+.kpi .box{background:#f8faff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi .box b{display:block;font-size:23px;font-weight:800;letter-spacing:-.02em}
+.kpi .box span{font-size:12.6px;color:var(--muted)}
+footer{text-align:center;color:var(--muted);font-size:13px;margin-top:26px}
+</style></head>
+<body><div class="wrap">
+
+<div class="hero">
+  <div class="kicker">Paper2Code · 论文复现报告</div>
+  <h1>Where Does the Cache Hit Ratio Go?</h1>
+  <div class="pills">
+    <span class="pill">情形 B · 无任何代码</span>
+    <span class="pill">判定置信度 0.7</span>
+    <span class="pill">校验结论 not_verifiable</span>
+    <span class="pill">论文 ID ui_click_test</span>
+  </div>
+  <div class="reason">无代码、无伪代码，只能依据正文与表格数据重建</div>
+</div>
+
+<div class="card">
+  <h2>总体校验结果</h2>
+  <div class="kpi">
+    <div class='box'><b>0</b><span>通过检查</span></div><div class='box'><b>0</b><span>告警检查</span></div><div class='box'><b>0</b><span>失败检查</span></div><div class='box'><b>0</b><span>重绘图表</span></div><div class='box'><b>0</b><span>数据表</span></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>一、复现策略</h2>
+  <div class="strategy">论文既无代码也无伪代码，可复现的上限是**数据自洽性与可视化复刻**。我们以论文表格与附带数据为唯一事实来源，重建 tidy 数据、校验其内部一致性（占比求和、汇总行、最优性声明），并重绘图表。数据集、超参、预处理等未披露要素会被列成清单，供人工补齐后二次复现。
+
+【模型补充】优先从 T1 反推内容类别与目标统计量，用合成或重采样生成 &lt;1 万条请求记录：按请求份额分配各类别请求数，再依请求命中率随机标记命中，并为每类赋予合理字节大小以匹配字节份额。随后按类别汇总，计算请求/字节份额与命中率，与 T1 对比校正；用同一汇总绘制 F1，即每类请求份额与字节份额的对比（双柱或散点）。T2 的总请求量只能记录原始值，单机小数据下无法复现。主要风险：无原始数据与代码，类别边界和字节分布未知，命中率随机标记引入偏差，小样本比例不稳定，F1 精确形态可能失真。应固定随机种子、报告多次抽样波动，并明确标注缩放与不可复现项。</div>
+  <h3>执行步骤</h3>
+  <ol class="steps"><li>抽取论文中的全部表格与附带数据文件，整理为 tidy CSV</li><li>对论文数据做内部一致性校验（占比求和、汇总行、最优性声明、排名合法性）</li><li>以正文描述为线索重绘论文中的图表，做风格复刻</li><li>输出「无法复现要素清单」：缺失的数据集、超参、随机种子、预处理细节</li></ol>
+</div>
+
+<div class="card">
+  <h2>二、复现目标清单</h2>
+  <table><thead><tr><th>类型</th><th>ID</th><th>说明</th><th class="num">规模</th><th>角色</th></tr></thead>
+  <tbody><tr><td>figure</td><td><code>F1</code></td><td>Request share versus byte share by content class. The two</td><td class='num'>—</td><td>讲解引用</td></tr></tbody></table>
+</div>
+
+<div class="card">
+  <h2>三、数据输入</h2>
+  <table><thead><tr><th>表</th><th class="num">行数</th><th class="num">列数</th><th>来源</th><th>数值列</th><th>截断</th></tr></thead>
+  <tbody><tr><td colspan="6" class="muted">未抽取到表格数据</td></tr></tbody></table>
+</div>
+
+<div class='card'><h2>四、无法复现要素清单</h2><ul class='notes'><li>数据集/数据来源</li><li>超参数与训练配置</li><li>随机种子/重复次数</li><li>预处理与分词细节</li><li>硬件与运行环境</li></ul></div>
+
+<div class="card">
+  <h2>五、校验与对标明细</h2>
+  <table><thead><tr><th>状态</th><th>检查项</th><th>范围</th><th>说明</th></tr></thead>
+  <tbody><tr><td colspan="4" class="muted">无可执行的校验项</td></tr></tbody></table>
+</div>
+
+<div class="card">
+  <h2>六、图表重绘</h2>
+  <p class='muted'>无可用数据重绘图表。</p>
+</div>
+
+<div class="card">
+  <h2>七、规模约束与扩展性</h2>
+  <ul class="notes"><li>本次复现的数据规模上限：10000 条记录</li><li>单次执行超时：120s</li><li>架构预留：执行器（reproduce.runner）与计划（reproduce.planner）解耦，后续可替换为容器/集群后端而无需改动用例定义</li></ul>
+</div>
+
+<div class='card'><h2>八、注意事项</h2><div class='warnbox'><ul class='notes'><li>以下要素在论文中未明确披露，无法复现：数据集/数据来源、超参数与训练配置、随机种子/重复次数、预处理与分词细节、硬件与运行环境。已列入报告，供人工补齐后二次复现。</li></ul></div></div>
+
+<footer>本报告由 paper2code 自动生成 · 数值对标阈值：pass ≤ 5%，warn ≤ 20%</footer>
+</div></body></html>

@@ -17,6 +17,48 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from ..models import Figure, Paper, Slide, Table
+from .. import textutil
+
+_CLOSE_HEAD = re.compile(
+    r"(?im)^\s*(?:(?:section|chapter|第)\s*)?"
+    r"(?:(?:\d+|[ivxlcdm]+|[一二三四五六七八九十]+)[\.、.:：)]?\s+)?"
+    r"(?:"
+    r"conclusions?(?:\s+and\s+outlook)?"
+    r"|discussion"
+    r"|limitations?"
+    r"|outlook"
+    r"|future\s+works?"
+    r"|结论(?:与展望)?"
+    r"|讨论"
+    r"|展望"
+    r"|不足"
+    r"|局限"
+    r")\s*$"
+)
+_STOP_HEAD = re.compile(
+    r"(?im)^\s*(?:(?:section|chapter|第)\s*)?"
+    r"(?:(?:\d+|[ivxlcdm]+|[一二三四五六七八九十]+)[\.、.:：)]?\s+)?"
+    r"(?:methods?|references?|acknowledg(?:e?ments?)?|bibliograph(?:y|ies)|"
+    r"appendix|supplementary(?:\s+material)?|data\s+availability|"
+    r"code\s+availability|方法|参考文献|致谢|附录|数据可用性)\s*$"
+)
+_NEXT_HEAD = re.compile(
+    r"(?im)^\s*(?:(?:section|chapter|第)\s*)?"
+    r"(?:\d+|[ivxlcdm]+|[一二三四五六七八九十]+)[\.、.:：)]?\s+"
+    r"[A-Za-z\u4e00-\u9fff]"
+)
+_OUTLOOK_RE = re.compile(
+    r"recommend|future work|in the future|outlook|we (?:will|plan)|should report|"
+    r"open (?:problem|question)|pave the way|opens up|new applications|"
+    r"建议|展望|未来|下一步|开放问题",
+    re.I,
+)
+_LIMIT_RE = re.compile(
+    r"limitations?|bottleneck|further improved|more research|"
+    r"cannot|unable|not (?:be )?released|drawback|caveat|"
+    r"only (?:a )?single|不足|局限|未能|无法|缺点|偏差|无法公开",
+    re.I,
+)
 
 _CSS = """
 *{box-sizing:border-box;margin:0;padding:0}
@@ -66,13 +108,35 @@ ul.bullets li::before{
   content:"";position:absolute;left:18px;top:22px;width:9px;height:9px;border-radius:50%;
   background:linear-gradient(135deg,var(--brand),var(--brand2));
 }
-.slide.title-slide{display:none;background:linear-gradient(135deg,#3b4fd8 0%,#6d4de0 46%,#0e9f9a 100%);color:#fff;border:none;height:calc(100vh - 96px);max-height:calc(100vh - 96px)}
+.slide.title-slide{display:none;background:linear-gradient(135deg,#3b4fd8 0%,#6d4de0 46%,#0e9f9a 100%);color:#fff;border:none;height:calc(100vh - 96px);max-height:calc(100vh - 96px);overflow:hidden}
 .slide.title-slide.active{display:flex;flex-direction:column}
 .slide.title-slide::after{display:none}
-.slide.title-slide .kicker{color:rgba(255,255,255,.85)}
-.slide.title-slide .sub{color:rgba(255,255,255,.9)}
-.slide.title-slide ul.bullets li{background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.24);color:#fff}
-.slide.title-slide ul.bullets li::before{background:#fff}
+.slide.title-slide .slide-body{
+  display:flex;flex-direction:column;justify-content:center;gap:4px;
+  overflow:hidden;height:100%;max-height:100%;padding-right:0;
+}
+.slide.title-slide .kicker{color:rgba(255,255,255,.85);margin-bottom:14px}
+.slide.title-slide h1{
+  font-size:clamp(22px, 3.2vw, 34px);line-height:1.28;letter-spacing:-.02em;
+  overflow-wrap:anywhere;word-break:break-word;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;
+}
+.slide.title-slide .title-meta{
+  margin-top:14px;font-size:16px;font-weight:600;opacity:.92;
+  overflow-wrap:anywhere;word-break:break-word;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
+}
+.slide.title-slide .title-lead{
+  margin-top:16px;font-size:16.5px;line-height:1.55;max-width:38em;opacity:.95;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;
+}
+.slide.title-slide .sub{
+  color:rgba(255,255,255,.86);margin-top:18px;font-size:14px;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
+}
+.slide.title-slide ul.bullets,.slide.title-slide ul.bullets li{display:none!important}
+.takeaway .pill{margin-right:8px}
+.takeaway h3{font-size:15.5px;font-weight:750;color:#39457a;margin:14px 0 8px}
 .agenda{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:8px}
 .agenda .item{
   background:#f8faff;border:1px solid var(--line);border-radius:12px;padding:13px 16px;font-size:15.4px;
@@ -362,6 +426,257 @@ def _copy_asset(src: str, dest_dir: Path, paper: Paper) -> Optional[str]:
     return None
 
 
+def _clean_bullets(items: Optional[List[str]]) -> List[str]:
+    out: List[str] = []
+    for raw in items or []:
+        b = re.sub(r"\s+", " ", str(raw or "")).strip().strip('"').strip("'")
+        if len(b) < 2:
+            continue
+        out.append(b)
+    return out
+
+
+def _fmt_authors(paper: Paper, limit: int = 8) -> str:
+    names: List[str] = []
+    for a in paper.authors or []:
+        a = str(a).strip().strip('"').strip("'")
+        a = re.split(r"\b(?:authors?|title)\s*:", a, maxsplit=1, flags=re.I)[0].strip().strip('"')
+        pieces = [p.strip().strip('"') for p in re.split(r"\s*,\s*", a) if p.strip()] if a.count(",") >= 1 and len(a) > 48 else [a]
+        for p in pieces:
+            p = re.sub(r"\d+$", "", p).strip()
+            if len(p) < 2 or re.match(r"^\d", p):
+                continue
+            if p.lower() not in {x.lower() for x in names}:
+                names.append(p)
+    if not names and (paper.raw_text or ""):
+        for line in (paper.raw_text or "").splitlines()[:6]:
+            line = line.strip()
+            if not line or line.lower().startswith(("title", "abstract", "where does")):
+                continue
+            if re.search(r"\d", line):
+                continue
+            bits = [p.strip() for p in re.split(r"\s*,\s*", line) if p.strip()]
+            if 1 <= len(bits) <= 8:
+                names = bits
+                break
+    return ", ".join(names[:limit])
+
+
+def _full_title(paper: Paper) -> str:
+    title = re.sub(r"\s+", " ", (paper.title or "").strip())
+    from_id = re.sub(r"\s+", " ", (paper.id or "").replace("_", " ")).strip()
+    if from_id and title and from_id.lower().startswith(title.lower()) and len(from_id) > len(title) + 2:
+        title = from_id
+    if not title and (paper.raw_text or ""):
+        title = (paper.raw_text.splitlines()[0] or "").strip()
+    return title
+
+
+def _title_lead(paper: Paper) -> str:
+    text = (paper.abstract or "").strip()
+    if len(text) < 40:
+        blob = paper.raw_text or ""
+        m = re.search(
+            r"(?is)(?:^|\n)\s*abstract\b[:\s]*\n?(.*?)(?=\n\s*(?:\d+[\.\s]+)?(?:introduction|引言)\b)",
+            blob,
+        )
+        if m:
+            text = re.sub(r"\s+", " ", m.group(1)).strip()
+    if len(text) < 40:
+        for kind in ("abstract", "introduction", "discussion"):
+            chunk = paper.section_text(kind)
+            if len((chunk or "").strip()) >= 40:
+                text = chunk
+                break
+    if len(text) < 40:
+        return ""
+    sents = textutil.split_sentences(text)
+    return textutil.condense(sents[0] if sents else text, 160)
+
+
+def title_bits(paper: Paper) -> List[str]:
+    return [x for x in (_fmt_authors(paper), _title_lead(paper)) if x]
+
+
+def _blob(paper: Paper) -> str:
+    parts = [paper.raw_text or "", paper.abstract or ""]
+    for s in paper.sections:
+        heading = (s.heading or "").strip()
+        if heading or s.text:
+            parts.append(heading + "\n" + (s.text or ""))
+    return "\n".join(parts)
+
+
+def _classify_close_heading(heading: str) -> str:
+    h = (heading or "").lower()
+    if any(k in h for k in ("不足", "局限", "limitation")):
+        return "limitation"
+    if any(k in h for k in ("展望", "outlook", "future")) and not any(
+        k in h for k in ("conclusion", "结论")
+    ):
+        return "outlook"
+    if any(k in h for k in ("讨论", "discussion")):
+        return "discussion"
+    return "conclusion"
+
+
+def _chunk_after_headings(blob: str) -> Dict[str, str]:
+    buckets: Dict[str, List[str]] = {
+        "conclusion": [],
+        "outlook": [],
+        "limitation": [],
+        "discussion": [],
+    }
+    empty = {k: "" for k in buckets}
+    if not (blob or "").strip():
+        return empty
+    current = ""
+    buf: List[str] = []
+
+    def flush() -> None:
+        text = " ".join(x.strip() for x in buf if x.strip())
+        if current and text:
+            buckets[current].append(text)
+
+    for line in blob.splitlines():
+        raw = line.strip()
+        m = _CLOSE_HEAD.match(raw)
+        if m:
+            flush()
+            buf = []
+            current = _classify_close_heading(m.group(0))
+            continue
+        if current and (
+            (_NEXT_HEAD.match(raw) and not _CLOSE_HEAD.match(raw)) or _STOP_HEAD.match(raw)
+        ):
+            flush()
+            buf = []
+            current = ""
+            continue
+        if current:
+            buf.append(line)
+    flush()
+    return {k: " ".join(v) for k, v in buckets.items()}
+
+
+def _pick_sents(
+    text: str,
+    n: int,
+    prefer: Optional[re.Pattern] = None,
+    fill: bool = True,
+    lead: bool = False,
+) -> List[str]:
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if len(text) < 12:
+        return []
+    sents = textutil.split_sentences(text)
+    matched = [s for s in sents if prefer.search(s)] if prefer is not None else []
+    picked: List[str] = []
+    if lead and sents:
+        picked.append(sents[0])
+    for s in matched:
+        if s not in picked:
+            picked.append(s)
+    if len(picked) < n and (fill or not matched):
+        for s in textutil.summarize(text, n=max(n, 2)):
+            if s not in picked:
+                picked.append(s)
+    out: List[str] = []
+    seen = set()
+    for s in picked:
+        bit = textutil.condense(s, 108)
+        key = bit.lower()
+        if len(bit) < 8 or key in seen:
+            continue
+        seen.add(key)
+        out.append(bit)
+        if len(out) >= n:
+            break
+    return out
+
+
+def closing_bullets(paper: Paper) -> List[str]:
+    """从论文末尾抽取结论 / 展望 / 不足，保证最后一页有可讲的内容。"""
+    chunks = _chunk_after_headings(_blob(paper))
+    conc = (paper.section_text("conclusion") or "").strip() or chunks.get("conclusion") or ""
+    disc = (paper.section_text("discussion") or "").strip() or chunks.get("discussion") or ""
+    outlook = chunks.get("outlook") or ""
+    limit = chunks.get("limitation") or ""
+    tail = (paper.raw_text or paper.abstract or "")[-2200:]
+    if len(conc) < 40:
+        conc = disc or tail
+    if len(outlook) < 40:
+        outlook = disc or tail
+    if len(limit) < 40:
+        limit = f"{disc} {tail}".strip() or disc
+    labeled: List[str] = []
+    seen = set()
+    mapping = [
+        ("结论", conc, None, True, True),
+        ("展望", outlook, _OUTLOOK_RE, True, False),
+        ("不足", limit, _LIMIT_RE, False, False),
+    ]
+    want_n = {"结论": 2, "展望": 2, "不足": 2}
+    for label, text, prefer, fill, lead in mapping:
+        for bit in _pick_sents(text, want_n[label], prefer, fill=fill, lead=lead):
+            key = bit.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            labeled.append(f"{label}：{bit}")
+    if not any(x.startswith("结论") for x in labeled) and (paper.abstract or tail):
+        bit = textutil.condense(paper.abstract or tail, 120)
+        if len(bit) >= 8:
+            labeled.insert(0, "结论：" + bit)
+    if len(labeled) < 3:
+        for sent in textutil.summarize(tail, n=4):
+            bit = textutil.condense(sent, 108)
+            if len(bit) < 8 or bit.lower() in seen:
+                continue
+            seen.add(bit.lower())
+            if not any(x.startswith("结论") for x in labeled):
+                tagged = "结论"
+            elif not any(x.startswith("展望") for x in labeled):
+                tagged = "展望"
+            else:
+                tagged = "不足"
+            labeled.append(f"{tagged}：{bit}")
+            if len(labeled) >= 5:
+                break
+    return labeled[:6] or ["结论：原文末尾未抽到独立结论段，建议对照论文最后一节人工补充。"]
+
+
+def polish_slides(paper: Paper, slides: List[Slide]) -> List[Slide]:
+    """去掉封面空框，并把最后一页补成结论 / 展望 / 不足。"""
+    slides = list(slides or [])
+    if not slides:
+        return slides
+    first = slides[0]
+    if first.kind == "title":
+        full = _full_title(paper)
+        if full:
+            first.title = full
+        bits = title_bits(paper)
+        first.bullets = bits or _clean_bullets(first.bullets)[:2]
+    filled = closing_bullets(paper)
+    last = slides[-1]
+    close_title = any(
+        k in (last.title or "") for k in ("小结", "结论", "展望", "不足", "takeaway", "可复现")
+    )
+    weak = not _clean_bullets(last.bullets) or all(
+        ("未抽取" in b or "人工补充" in b) for b in _clean_bullets(last.bullets)
+    )
+    if last.kind == "takeaway" or close_title or weak:
+        last.title = "结论、展望与不足"
+        last.kind = "takeaway"
+        last.bullets = filled
+    else:
+        slides.append(Slide(title="结论、展望与不足", bullets=filled, kind="takeaway"))
+    for s in slides:
+        s.bullets = _clean_bullets(s.bullets)
+    return slides
+
+
 def render_courseware(
     paper: Paper,
     slides: List[Slide],
@@ -372,6 +687,7 @@ def render_courseware(
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    slides = polish_slides(paper, list(slides))
     fig_map: Dict[str, Figure] = {f.id: f for f in paper.figures}
     tab_map: Dict[str, Table] = {t.id: t for t in paper.tables}
 
@@ -386,12 +702,22 @@ def render_courseware(
 
         if slide.kind == "title":
             parts.append('<div class="kicker">Paper2Code · 论文精讲</div>')
-            parts.append(f"<h1>{_esc(slide.title)}</h1>")
-            if slide.bullets:
-                parts.append('<ul class="bullets" style="margin-top:26px">')
-                for b in slide.bullets:
-                    parts.append(f"<li>{_esc(b)}</li>")
-                parts.append("</ul>")
+            parts.append(f"<h1>{_esc(_full_title(paper) or slide.title)}</h1>")
+            authors = _fmt_authors(paper)
+            lead = _title_lead(paper)
+            bullets = _clean_bullets(slide.bullets)
+            if not authors and bullets:
+                authors = bullets[0]
+                bullets = bullets[1:]
+            if not lead:
+                for cand in bullets:
+                    if cand != authors:
+                        lead = cand
+                        break
+            if authors:
+                parts.append(f'<p class="title-meta">{_esc(authors)}</p>')
+            if lead:
+                parts.append(f'<p class="title-lead">{_esc(lead)}</p>')
             parts.append(
                 f'<p class="sub">自动生成（provider: {_esc(generator)}）· '
                 f'共 {len(slides)} 页 · 使用 ← → 翻页，打印可导出 PDF</p>'
@@ -400,8 +726,10 @@ def render_courseware(
             parts.append('<div class="kicker">Agenda</div>')
             parts.append(f"<h2>{_esc(slide.title)}</h2><div class='rule'></div>")
             parts.append('<div class="agenda">')
-            for i, b in enumerate(slide.bullets, start=1):
+            for i, b in enumerate(_clean_bullets(slide.bullets), start=1):
                 label = re.sub(r"^\d+[.、]\s*", "", b)
+                if not label:
+                    continue
                 parts.append(
                     f'<div class="item"><span class="num">{i}</span><span>{_esc(label)}</span></div>'
                 )
@@ -419,11 +747,17 @@ def render_courseware(
                     parts.append("</ul>")
             elif slide.bullets:
                 parts.append('<ul class="bullets">')
-                for b in slide.bullets:
-                    parts.append(f"<li>{_esc(b)}</li>")
+                for b in _clean_bullets(slide.bullets):
+                    m = re.match(r"^(结论|展望|不足)[：:]\s*(.+)$", b)
+                    if slide.kind == "takeaway" and m:
+                        parts.append(
+                            f'<li><span class="pill">{_esc(m.group(1))}</span>{_esc(m.group(2))}</li>'
+                        )
+                    else:
+                        parts.append(f"<li>{_esc(b)}</li>")
                 parts.append("</ul>")
 
-        if slide.figure_id and slide.figure_id in fig_map:
+        if slide.kind not in ("title", "agenda") and slide.figure_id and slide.figure_id in fig_map:
             fig = fig_map[slide.figure_id]
             rel = _copy_asset(fig.image_path or "", out_path.parent, paper)
             if rel:
@@ -439,7 +773,7 @@ def render_courseware(
                     f"{_esc(fig.caption or '（该图未能从源文件提取到图像，见原文）')}</p>"
                 )
 
-        if slide.table_id and slide.table_id in tab_map:
+        if slide.kind not in ("title", "agenda") and slide.table_id and slide.table_id in tab_map:
             parts.append(render_table_html(tab_map[slide.table_id]))
 
         if slide.notes:

@@ -15,8 +15,13 @@ import urllib.request
 from typing import Any, Dict, List, Optional
 
 from ..models import Algorithm, Paper, Slide, Table
-from ..textutil import condense, split_sentences
 from .base import LLMProvider
+
+
+def _title_bits(paper: Paper) -> List[str]:
+    from ..explain.courseware import title_bits
+
+    return title_bits(paper)
 
 
 class OpenAIProvider(LLMProvider):
@@ -166,12 +171,15 @@ class OpenAIProvider(LLMProvider):
 
             return OfflineProvider().slides(paper, outline)
 
-        # 封面与目录由本地补齐，保证版式一致
-        head = Slide(title=paper.title or "论文讲解",
-                     bullets=[", ".join(paper.authors[:4]), condense(paper.abstract, 140) or ""],
-                     kind="title")
+        head = Slide(
+            title=paper.title or "论文讲解",
+            bullets=_title_bits(paper),
+            kind="title",
+        )
         agenda = Slide(title="本次讲解路线", bullets=[f"{i+1}. {h}" for i, h in enumerate(outline)], kind="agenda")
-        tail = Slide(title="小结与可复现性", bullets=[], kind="takeaway")
+        from ..explain.courseware import closing_bullets
+
+        tail = Slide(title="结论、展望与不足", bullets=closing_bullets(paper), kind="takeaway")
         return [head, agenda] + slides + [tail]
 
     def dialogue(self, paper: Paper) -> List[Dict[str, str]]:

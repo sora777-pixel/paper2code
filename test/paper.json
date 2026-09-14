@@ -1,0 +1,55 @@
+{
+  "id": "ui_click_test",
+  "title": "Where Does the Cache Hit Ratio Go?",
+  "authors": [
+    "Lian Zhou",
+    "Ruoxi Feng",
+    "Kaiyuan Wang authors: \"Lian Zhou",
+    "Ruoxi Feng",
+    "Kaiyuan Wang\""
+  ],
+  "abstract": "",
+  "source_path": "E:\\chatgpt-ai-demo\\paper2code\\paper2code\\incoming\\ui_click_test\\paper.pdf",
+  "source_kind": "pdf",
+  "sections": [],
+  "tables": [
+    {
+      "id": "T1",
+      "caption": "reports the composition of the workload by content class. | Content class | Request share (%) | Byte share (%) | Request hit ratio | Byte hit ratio | | --- | --- | --- | --- | --- | | Static assets | 46.8% | 12.1% | 0.94 | 0.91 |",
+      "header": [],
+      "rows": [],
+      "source": "pdf-caption"
+    },
+    {
+      "id": "T2",
+      "caption": "aggregates the deployment over the whole measurement window. | Metric | Value | | --- | --- | | Total requests | 63,214,880 |",
+      "header": [],
+      "rows": [],
+      "source": "pdf-caption"
+    }
+  ],
+  "figures": [
+    {
+      "id": "F1",
+      "caption": "Request share versus byte share by content class. The two",
+      "image_path": null,
+      "page": null,
+      "kind": "unknown"
+    }
+  ],
+  "algorithms": [],
+  "formulas": [],
+  "code_refs": [],
+  "data_refs": [],
+  "raw_text": "Where Does the Cache Hit Ratio Go?\nLian Zhou, Ruoxi Feng, Kaiyuan Wang\ntitle: \"Where Does the Cache Hit Ratio Go? An Empirical Decomposition of Edge CDN Workloads\"\nauthors: \"Lian Zhou, Ruoxi Feng, Kaiyuan Wang\"\nAbstract\nEdge content delivery networks report aggregate cache hit ratios as their primary\nefficiency metric, yet practitioners routinely observe that two deployments with\nthe same aggregate ratio deliver very different end-to-end latency. We conduct a\nmeasurement study over four weeks of production traces from a regional edge\ndeployment serving 63 million requests. We decompose the aggregate hit ratio by\ncontent class, by request-size bucket, and by delivery path, and we quantify how\nmuch of the variance in origin offload is explained by each decomposition. Our\ncentral finding is that byte-level hit ratio and request-level hit ratio diverge\nsharply: video segments account for 7.1 percent of requests but 68.4 percent of\nbytes, so a deployment optimized for request count systematically misestimates\norigin egress. We release the aggregated workload statistics used in this paper.\n1 Introduction\nCaching is the single most effective lever for reducing origin load in content\ndelivery. Operators therefore monitor cache hit ratio closely, and it appears in\nalmost every vendor's dashboard. The metric is appealingly simple, but it hides a\nwell-known ambiguity: it can be computed over requests or over bytes, and the two\nanswers can differ by an order of magnitude.\nThis paper asks a narrow, operational question: if we decompose the aggregate\nhit ratio along the dimensions that operators can actually control, which\ndecomposition best predicts origin egress and tail latency? Answering it requires\nrequest-level traces rather than dashboard aggregates, so we instrumented a\nregional edge deployment for four weeks.\nOur contributions are threefold. First, we provide a systematic decomposition of\ncache performance across content class, object size, and delivery path. Second,\nwe quantify the mismatch between request-level and byte-level accounting. Third,\nwe show that a two-parameter model over content class explains most of the\nobserved variance in origin offload.\n2 Related Work\nPrior measurement studies of web caches focused on request-level hit ratios and\non the effect of replacement policies under synthetic workloads. Trace-driven\nsimulation work established that object size distributions are heavy-tailed, which\nimplies that request-weighted and byte-weighted metrics must diverge. Our study\nconfirms this on a modern edge deployment and extends it with a delivery-path\ndecomposition that earlier work did not have access to.\n3 Methodology\n\n<!-- page 2 -->\n\n3.1 Measurement Setup\nWe collected four weeks of access logs from a regional edge deployment with nine\npoints of presence. Each log record contains a timestamp, a content class label\nassigned by the origin's content management system, the response size in bytes,\nthe delivery path (edge hit, parent hit, or origin fetch), and the time to last\nbyte. We excluded requests smaller than 100 bytes because they are dominated by\ncontrol-plane traffic.\n3.2 Metrics\nWe define the request-level hit ratio as the fraction of requests served without\ncontacting the origin, and the byte-level hit ratio as the fraction of response\nbytes that were served from cache. We also report origin egress reduction, which\nis one minus the ratio of origin-served bytes to total bytes.\n4 Results\n4.1 Traffic Composition\nTable 1 reports the composition of the workload by content class.\n| Content class | Request share (%) | Byte share (%) | Request hit ratio | Byte hit ratio |\n| --- | --- | --- | --- | --- |\n| Static assets | 46.8% | 12.1% | 0.94 | 0.91 |\n| Images | 27.4% | 12.4% | 0.88 | 0.84 |\n| Video segments | 7.1% | 68.4% | 0.62 | 0.58 |\n| API responses | 18.7% | 7.1% | 0.41 | 0.39 |\nTable 1. Workload composition and cache performance by content class. Request\nshare and byte share sum to 100 percent.\n4.2 Aggregate Totals\nTable 2 aggregates the deployment over the whole measurement window.\n| Metric | Value |\n| --- | --- |\n| Total requests | 63,214,880 |\n| Total bytes | 412,660,000,000 |\n| Request hit ratio | 0.83 |\n| Byte hit ratio | 0.61 |\n| Origin egress reduction | 0.61 |\n| Average time to last byte | 148.0 |\nTable 2. Aggregate deployment statistics over the four week window.\n4.3 Why Request Share and Byte Share Diverge\nVideo segments are the extreme case. They represent 7.1 percent of requests but\n68.4 percent of bytes, and their byte hit ratio of 0.58 is the second lowest\nobserved. Consequently the region's aggregate byte hit ratio, 0.61, is more than\n\n<!-- page 3 -->\n\ntwenty points below its request hit ratio of 0.83.\nFigure 1. Request share versus byte share by content class. The two\ndistributions disagree most sharply for video segments.\n4.4 A Two-Parameter Model\nFitting origin egress as a function of content-class request share and class byte\nhit ratio yields a two-parameter model that explains 0.93 of the variance across\nthe nine points of presence.\n5 Discussion\nOperators who monitor only request-level hit ratios will under-provision origin\nbandwidth whenever video share grows. We recommend reporting both metrics side by\nside, and we recommend weighting capacity planning by byte share rather than\nrequest share.\n6 Conclusion\nAggregate cache hit ratio is an ambiguous metric. Decomposing it by content class\nreveals that byte-level and request-level accounting can differ by more than\ntwenty percentage points in a realistic edge deployment. Our two-parameter model\nover content class explains most of the variance in origin offload and is cheap\nto instrument.\n7 Data Availability\nThe aggregated workload statistics underlying Table 1 and Table 2 are provided\nalongside this paper as a CSV file. Raw request logs cannot be released because\nthey contain tenant-identifying fields.",
+  "meta": {
+    "frontmatter": {},
+    "code_statement": "",
+    "warnings": [],
+    "pdf_pages": 1,
+    "pdf_backend": "pymupdf",
+    "bundle_dir": "E:\\chatgpt-ai-demo\\paper2code\\paper2code\\incoming\\ui_click_test",
+    "provided_data": []
+  },
+  "pdf_backend": "pymupdf"
+}
