@@ -1,0 +1,18 @@
+{
+  "id": "fig_f3",
+  "paper_ref": "Figure 3",
+  "caption": "Regressions on the validation set using PRODIGY, Rosetta, and the trained ML and SL models (RMSE: root-mean-square error; R:",
+  "kind": "bar",
+  "reproducibility": "not_reproducible",
+  "data_keys": [],
+  "axes": {},
+  "series": [],
+  "chart": null,
+  "layout": "1x1",
+  "style_notes": "",
+  "diagram": null,
+  "mermaid": null,
+  "demo_change_needed": "需要真实实验数据；可让 demo 写出对应曲线/扫参结果（见 plan.required_outputs）后再绘制",
+  "source_note": "",
+  "original_image": "./figures/p04_x289.png"
+}

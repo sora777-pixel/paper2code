@@ -63,7 +63,10 @@ def classify(paper: Paper) -> ModeDecision:
         return ModeDecision(MODE_OPEN_SOURCE, 0.98, "论文包内直接附带可读代码，按「有开源代码」处理", evidence)
 
     # -- 2) 正文中的仓库链接 ----------------------------------------------- #
-    repo_refs = [r for r in paper.code_refs if r.kind == "repo"]
+    repo_refs = [
+        r for r in paper.code_refs
+        if r.kind == "repo" and getattr(r, "role", "unclear") != "third_party"
+    ]
     other_refs = [
         r for r in paper.code_refs
         if r.kind == "other" and any(h in r.url.lower() for h in _OTHER_CODE_HOSTS)

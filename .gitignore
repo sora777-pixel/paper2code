@@ -1,47 +1,62 @@
-﻿# Python / venv
+# ===========================================================================
+# paper2code · 版本库忽略清单
+# 原则：本地状态、产物、语料、密钥一律不进版本库（见 docs 路线图 M0）
+# ===========================================================================
+
+# --- 虚拟环境 / 依赖 ---
 .venv/
 venv/
+env/
 __pycache__/
 *.py[cod]
-*$py.class
 *.egg-info/
 .eggs/
-dist/
-build/
 
-# Local secrets & env
-.env
-.env.*
-configs/api_keys.yaml
-configs/api_keys.yml
-configs/secrets.local.yaml
-configs/*.local.yaml
-*.pem
-
-# Runtime / work dirs
+# --- 本地状态与运行产物 ---
 .work/
 .workbuddy/
 outputs/
 incoming/
+local_docs/
+.trae-html-share-packages/
 
-# Media / generated
-*.mp3
-*.wav
-Thumbs.db
-Desktop.ini
+# --- 测试输入（体积大，默认本地保存；tests/README.md 记录映射） ---
+tests/inputs/single/
+tests/inputs/batch/
 
-# Logs & root scratch only (leading / = repo root)
-*.log
-/_*.log
-/_*.txt
-/_*.py
-/_*.bat
-pdf-bakeoff/
-*.bak_*
+# --- 语料 / 上传包 / 解包草稿（体积大，使用者自行放置） ---
+_corpus/
+_incoming_files_10_19/
+_test_paper/
+_test_paper_si/
+samples/_*/
+
+# --- 密钥：绝不入库 ---
+configs/api_keys.yaml
+configs/api_keys.*.yaml
+configs/*.local.yaml
+.env
+.env.*
+*.pem
+*.p12
+
+# --- 补丁备份 / 临时草稿（`_` 前缀 = 草稿，batch 也会跳过） ---
+*.mvp.bak
 *.bak
+*.orig
+*.rej
+_*.log
+_*.txt
+_probe_*.py
+_diag*.py
+_unzip*.py
 
-# IDE / OS
+# --- 一次性调试脚本与日志（见 STRUCTURE.md） ---
+tools/debug/scripts/
+tools/debug/logs/
+
+# --- 编辑器 / 系统 ---
 .idea/
 .vscode/
-*.swp
 .DS_Store
+Thumbs.db

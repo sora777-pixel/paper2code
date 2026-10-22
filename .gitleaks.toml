@@ -1,0 +1,24 @@
+# gitleaks 配置（CI / pre-commit 的第二道闸门；第一道是 tools/scan_secrets.py）
+title = "paper2code"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "语料 / 上传包 / 产物 / 虚拟环境 / 草稿 与 文档里的占位符"
+paths = [
+    '''_corpus/''',
+    '''_incoming_files_10_19/''',
+    '''outputs/''',
+    '''\.venv/''',
+    '''samples/_''',
+    '''\.mvp\.bak$''',
+]
+regexes = [
+    '''sk-x{3,}''',
+    '''sk-xxx+''',
+    '''(?i)your[-_ ]?api[-_ ]?key''',
+    '''(?i)<(your|api|token)[-_ ]?[a-z]*>''',
+    '''(?i)(example|placeholder|redacted|dummy|fake)''',
+    '''sk-proj-\w{0,3}\.{3}''',
+]

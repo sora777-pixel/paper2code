@@ -1,0 +1,37 @@
+{
+  "root": "./reproduce/repo",
+  "url": "https://github.com/chavesejf/PBEE",
+  "exists": false,
+  "entrypoints": [
+    "pbee.py"
+  ],
+  "requirements_files": [
+    "environment.yml"
+  ],
+  "requirements": [
+    "numpy=1.24.4",
+    "pandas=2.0.3",
+    "scikit-learn=1.3.0",
+    "scipy=1.14.1",
+    "xgboost==2.0.1"
+  ],
+  "has_dockerfile": false,
+  "readme": "![logo](https://github.com/chavesejf/pbee/blob/main/figures/toc_page-0001.jpg)\n\n## Overview\nPBEE (**P**rotein **B**inding **E**nergy **E**stimator) is an easy-to-use pipeline written in Python3 that use a ML model based on Rosetta descriptors to predict the free energy of binding of protein-protein complexes. More details on PBEE training and validation can be found in our [publication](https://pubs.acs.org/doi/10.1021/acs.jcim.4c01641).\n\n## Requirements\n\n| Package        | Version |\n|----------------|---------|\n| python         | 3.10    |\n| PyRosetta      | 2024    |\n| scikit-learn   | 1.3.0   |\n| xgboost        | 2.0.1   |\n| numpy          | 1.24.4  |\n| pandas         | 2.0.3   |\n\n## Google Colab\nBefore install and run it locally, you can try the online version of PBEE in [Google Colab Notebook](https://colab.research.google.com/drive/1lu1dC0yRltKK_Wp-gF26oHcZSCiHaI8b).\n\n## Download & Install\n#### Step 1 - Install Conda (if not already installed)\n\nIf Conda is not already installed on your system, follow the instructions below to download and install it:\n\n1. Visit the [Anaconda installation page](https://www.anaconda.com/download/success).\n2. Download the Anaconda installer for your operating system.\n3. Follow the installation instructions on the page to complete the setup.\n\nAfter installing Anaconda, you should be able to use `conda` commands in your terminal.\n\n#### Step 2 - Clone the repository\n\n```\ngit clone https://github.com/chavesejf/PBEE.git\n```\n\n#### Step 3 - Create",
+  "data_files": [],
+  "result_files": [],
+  "code_language": "python",
+  "notes": [
+    "示例包未包含第三方仓库克隆；可用 url 重新 clone 后再复现。"
+  ],
+  "decision": {
+    "mode": "open_source",
+    "confidence": 0.9,
+    "reason": "论文正文给出代码仓库链接，按「有开源代码」处理",
+    "evidence": [
+      "代码链接：https://github.com/chavesejf/PBEE（出处：link: https://github.com/chavesejf/PBEE. In addition, PBEE…）",
+      "代码链接：https://colab.research.google.com/drive/1lu1dC0yRltKK_Wp-gF26oHcZSCiHaI8b（出处：use are available at: https://colab.research.google.com/drive/1lu1dC0yRltKK_Wp-g…）",
+      "代码链接：https://colab.research.google.com/drive/1lu1d-C0yRltKK_Wp-gF26oHcZSCiHaI8b（出处：link: https://colab.research.google.com/drive/1lu1d-C0yRltKK_Wp-gF26oHcZSCiHaI8b…）",
+      "正文表述：computationally demanding methods and currently available ML/DL tools. The method was encoded into an application Python"
+    ]
+  }
+}

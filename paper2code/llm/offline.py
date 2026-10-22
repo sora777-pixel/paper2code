@@ -19,56 +19,36 @@ from ..models import Algorithm, Figure, Paper, Section, Slide, Table
 from .base import LLMProvider
 
 # --------------------------------------------------------------------------- #
+# 赋值箭头归一化
+# --------------------------------------------------------------------------- #
+#: 论文伪代码的赋值符号五花八门，PDF 抽取时还可能进一步失真：
+#:   * LaTeX 原生：``←`` ``⟵`` ``⇐`` ``≔`` ``:=``
+#:   * ASCII 习惯：``<-``
+#:   * **字体替换残渣**：基础 PDF 字体（base14）不含 U+2190，渲染/抽取时会
+#:     把 ``←`` 退化成 ``·`` ``⋅`` ``∙`` ``•`` 这类中点/项目符号。
+#:     这是实跑中真实遇到的问题——整段算法会因此变成语法错误。
+#: 归一化只作用于**结构性位置**（语句首的赋值、for 头），因此表达式内部的
+#: ``·``（乘法）不会被误伤。
+_ARROW = r"(?:←|⟵|⇐|≔|:=|<-|·|⋅|∙|•)"
+#: 语句首赋值：``heap · []`` / ``let x ← 3`` / ``a, b := 1, 2``
+_ASSIGN_HEAD_RE = re.compile(
+    r"^(\s*(?:let\s+|set\s+)?[A-Za-z_][\w\.\[\]\'\"]*"
+    r"(?:\s*,\s*[A-Za-z_][\w\.\[\]\'\"]*)*)\s*" + _ARROW + r"\s*(?=\S)"
+)
+#: for 循环头：``for x · S do``
+_FOR_HEAD_RE = re.compile(r"^(\s*for\s+(?:each\s+)?[\w\s,]+?)\s*" + _ARROW + r"\s*", re.IGNORECASE)
+
+
+def _normalize_arrows(line: str) -> str:
+    """把结构位置的赋值箭头统一成 ``=``，供后续规则翻译消费。"""
+    line = _FOR_HEAD_RE.sub(r"\1 = ", line, count=1)
+    line = _ASSIGN_HEAD_RE.sub(r"\1 = ", line, count=1)
+    return line
+
+
+# --------------------------------------------------------------------------- #
 # 教学大纲模板
 # --------------------------------------------------------------------------- #
-
-_ZH_HEAD = {
-    "I. INTRODUCTION": "引言：问题从哪来",
-    "II. METHODS": "方法：模型与基组",
-    "III. RESULTS AND DISCUSSION": "结果与讨论",
-    "IV. CONCLUSIONS AND OUTLOOK": "结论与展望",
-    "DATA AVAILABILITY STATEMENT": "数据可用性",
-    "ACKNOWLEDGMENTS": "致谢",
-    "SUPPLEMENTARY MATERIAL": "补充材料",
-}
-
-_GLOSS = [
-    (r"wave functions?", "波函数"),
-    (r"molecular orbitals?|\bMOs?\b", "分子轨道"),
-    (r"Hamiltonians?", "哈密顿量"),
-    (r"overlap matrices?", "重叠矩阵"),
-    (r"eigenvalues?", "本征值"),
-    (r"eigenvalue problem", "本征值问题"),
-    (r"quasi-atomic minimal basis", "准原子最小基"),
-    (r"\bQUAMBOs?\b", "QUAMBO"),
-    (r"\bSchNOrb\b", "SchNOrb"),
-    (r"deep (convolutional )?neural network", "深度神经网络"),
-    (r"Hartree[-\s]Fock|\bHF\b", "Hartree-Fock"),
-    (r"Density Functional Theory|\bDFT\b", "密度泛函理论"),
-    (r"atomic orbitals?", "原子轨道"),
-    (r"basis (set|representation)", "基组表示"),
-]
-
-
-def _zh_head(head: str) -> str:
-    h = (head or "").strip()
-    if h in _ZH_HEAD:
-        return _ZH_HEAD[h]
-    return h
-
-
-def _to_zh(text: str) -> str:
-    s = (text or "").strip()
-    if not s:
-        return s
-    for pat, zh in _GLOSS:
-        s = __import__("re").sub(pat, zh, s, flags=__import__("re").IGNORECASE)
-    s = __import__("re").sub(r"\s+", " ", s).strip()
-    if not any("\u4e00" <= c <= "\u9fff" for c in s):
-        return "论文指出：" + s
-    return s
-
-
 _FALLBACK_OUTLINE = [
     "一句话总结",
     "研究背景与要解决的问题",
@@ -109,15 +89,13 @@ class OfflineProvider(LLMProvider):
             ("experiment", "实验：设置、数据与指标"),
         ):
             hit = pick(kind)
-            outline.append(_zh_head(hit) if hit else label)
+            outline.append(hit if hit else label)
 
         # 方法/实验章节往往有多个，逐个补入
         for name, k in zip(names, kinds):
             if k in ("method", "experiment") and name not in outline:
-                outline.append(_zh_head(name))
+                outline.append(name)
 
-        if getattr(paper, "formulas", None):
-            outline.append("带编号的公式（仅收录正文有解释的）")
         if paper.algorithms:
             outline.append("关键算法流程（伪代码逐行精读）")
         if paper.tables:
@@ -126,7 +104,7 @@ class OfflineProvider(LLMProvider):
             outline.append(f"图表速读（{len(paper.figures)} 张图）")
 
         conc = pick("conclusion")
-        outline.append(_zh_head(conc) if conc else "结论与局限")
+        outline.append(conc if conc else "结论与局限")
         outline.append("复现路径与本工具的处理方式")
 
         outline = textutil.dedupe_keep_order(outline)
@@ -171,8 +149,6 @@ class OfflineProvider(LLMProvider):
         used_tab: set[str] = set()
 
         for i, head in enumerate(outline):
-            if "公式" in head:
-                continue
             secs = self._sections_for(head, paper, by_kind)
             body = "\n\n".join(s.text for s in secs)
             bullets = self._bullets(body or paper.abstract, head, n=5)
@@ -222,32 +198,22 @@ class OfflineProvider(LLMProvider):
 
             slides.append(slide)
 
-        if getattr(paper, "formulas", None):
-            for f in paper.formulas[:8]:
-                slides.append(
-                    Slide(
-                        title=f"公式 ({f.number})",
-                        bullets=[
-                            f"表达式：{f.expression}",
-                            f"论文解释：{_to_zh(f.explanation)}",
-                            f"编号 ({f.number}) 与原文一致，便于对照。",
-                        ],
-                        kind="formula",
-                        notes=f"对应论文公式 ({f.number})",
-                    )
-                )
-
-        # 结论页
-        from ..explain.courseware import closing_bullets
-
-        slides.append(
-            Slide(
-                title="结论、展望与不足",
-                bullets=closing_bullets(paper),
-                kind="takeaway",
-                notes=self._repro_hint(paper),
-            )
-        )
+        # 结论页：固定「问题 → 方法 → 结果 → 局限 → 复现」叙事，和在线模式保持一致
+        summary = self._bullets(paper.section_text("conclusion", "discussion") or paper.abstract, "结论", n=4)
+        bullets = []
+        for label, text in zip(("结果", "局限", "补充", "补充"), summary):
+            item = f"{label}：{text}" if text else ""
+            if item and item not in bullets:
+                bullets.append(item)
+        problem = self._bullets(paper.section_text("introduction", "background") or paper.abstract, "背景", 1)
+        method = self._bullets(paper.section_text("method") or paper.abstract, "方法", 1)
+        if problem:
+            bullets.insert(0, f"问题：{problem[0]}")
+        if method:
+            bullets.insert(1 if problem else 0, f"方法：{method[0]}")
+        bullets.append("复现：" + self._repro_hint(paper))
+        slides.append(Slide(title="总结：要点回顾与复现路径", bullets=bullets[:6], kind="takeaway",
+                            notes="按「问题、方法、结果、局限、复现」的顺序回顾全篇。"))
         return slides
 
     # -- 内部工具 --------------------------------------------------------- #
@@ -255,7 +221,7 @@ class OfflineProvider(LLMProvider):
         if paper.abstract:
             sents = textutil.split_sentences(paper.abstract)
             if sents:
-                return _to_zh(textutil.condense(sents[0], 150))
+                return textutil.condense(sents[0], 150)
         return f"本文提出 {textutil.title_case_heading(paper.title)}。"
 
     def _sections_for(self, head: str, paper: Paper, by_kind: Dict[str, List[Section]]) -> List[Section]:
@@ -266,23 +232,13 @@ class OfflineProvider(LLMProvider):
         # 2) 大纲标签 → 章节类型
         mapping = {
             "研究背景": ("introduction", "background"),
-            "引言": ("introduction", "background"),
             "相关工作": ("related_work",),
             "预备知识": ("background",),
             "核心方法": ("method",),
-            "方法": ("method",),
             "实验": ("experiment",),
-            "结果": ("experiment",),
             "结论": ("conclusion", "discussion"),
             "一句话": ("abstract",),
-            "速览": ("abstract",),
         }
-        # 中文大纲标题 ↔ 原文章节名
-        for en, zh in _ZH_HEAD.items():
-            if head.strip() == zh or zh in head:
-                for s in paper.body_sections():
-                    if s.heading.strip() == en:
-                        return [s]
         for key, kinds in mapping.items():
             if key in head:
                 out: List[Section] = []
@@ -302,13 +258,16 @@ class OfflineProvider(LLMProvider):
             return [f"（{head}：原文未抽取到对应内容，建议人工补充）"]
         sents = textutil.summarize(text, n=n)
         bullets = [textutil.condense(s, 110) for s in sents]
-        bullets = [_to_zh(b) for b in bullets if len(b) >= 8]
-        return bullets[:n] or [_to_zh(textutil.condense(text, 120))]
+        bullets = [b for b in bullets if len(b) >= 8]
+        return bullets[:n] or [textutil.condense(text, 120)]
 
     def _repro_hint(self, paper: Paper) -> str:
         bits = []
-        if paper.code_refs:
-            bits.append(f"论文给出了 {len(paper.code_refs)} 个代码链接，可直接复用其仓库复现。")
+        own = paper.repo_urls()
+        if own:
+            bits.append(f"论文给出了 {len(own)} 个自有代码仓库链接，可直接复用其仓库复现。")
+        elif any(getattr(r, "kind", "") == "repo" for r in paper.code_refs):
+            bits.append("论文只引用了第三方/文献列表仓库，未给出本论文自有代码，不能直接复用其实现。")
         if paper.algorithms:
             bits.append(f"论文含 {len(paper.algorithms)} 段伪代码，需先翻译为可执行代码。")
         if paper.tables:
@@ -341,101 +300,70 @@ class OfflineProvider(LLMProvider):
     # 播客对白
     # ------------------------------------------------------------------ #
     def dialogue(self, paper: Paper) -> List[Dict[str, str]]:
-        """全中文播客稿：引导作者/读者理解研究目的、行文思路、实验设计、结论与不足。
-
-        仅依据 Introduction / Methods / Results / Discussion（及结论）组织内容；
-        **不**讲解公式推导或图表含义。课件中的公式页仍可保留，但不进入本对白。
-        """
         t = textutil.title_case_heading(paper.title or "这篇论文")
-        intro = self._podcast_excerpt(paper, "introduction", "background", head="引言", n=3)
-        methods = self._podcast_excerpt(paper, "method", head="方法", n=4)
-        results = self._podcast_excerpt(paper, "experiment", "results", head="结果", n=3)
-        discussion = self._podcast_excerpt(
-            paper, "discussion", "conclusion", head="讨论与结论", n=3
-        )
-        if discussion and discussion[0].startswith("（讨论与结论"):
-            extra = self._podcast_excerpt(paper, "conclusion", head="结论", n=2)
-            if not (extra and extra[0].startswith("（结论")):
-                discussion = extra
+        abstract_sents = textutil.split_sentences(paper.abstract)
+        one_liner = textutil.condense(abstract_sents[0], 140) if abstract_sents else ""
+
+        intro_sents = self._bullets(paper.section_text("introduction", "background") or paper.abstract, "背景", 3)
+        method_sents = self._bullets(paper.section_text("method") or paper.abstract, "方法", 4)
+        exp_sents = self._bullets(paper.section_text("experiment") or paper.abstract, "实验", 3)
+        conc_sents = self._bullets(paper.section_text("conclusion", "discussion") or paper.abstract, "结论", 3)
+
+        def spoken(sents: List[str], n: int = 2) -> str:
+            """把要点句合成一段 ≤n 句、适合朗读的口语回答（避免长句憋气）。"""
+            picked = [textutil.condense(s, 90).rstrip("。；") for s in sents[:n] if s.strip()]
+            return ("。".join(picked) + "。") if picked else ""
 
         tts: List[Dict[str, str]] = []
-        add = lambda spk, txt: tts.append({"speaker": spk, "text": str(txt).strip()})  # noqa: E731
+        add = lambda spk, txt: tts.append({"speaker": spk, "text": txt.strip()})  # noqa: E731
 
-        add("A", f"欢迎收听本期论文写作导读。今天我们一起读《{t}》。这期不讲公式、也不拆图表，只帮作者把研究目的、行文思路、实验设计和结论理清楚。")
-        add("B", f"好。这篇工作的核心，是围绕「{t}」回答一个具体的科学问题；我们按引言—方法—结果—讨论的顺序走一遍。")
+        add("A", f"欢迎收听本期论文精读。今天要聊的，是《{t}》。先别急着抠细节，一句话版本，这篇到底做了什么？")
+        add("B", "一句话概括：" + (one_liner or f"这篇论文围绕《{t}》提出了一个新的技术方案。"))
 
-        add("A", "先看引言：作者的研究目的是什么？想解决什么问题？")
-        add("B", " ".join(intro))
+        add("A", "嗯，听着有点意思。那它要解决的核心问题是什么？为什么这个问题值得做？")
+        add("B", "背景是这样的。" + spoken(intro_sents))
 
-        add("A", "行文思路上，作者打算怎样展开论证？读者读完全文应该带走什么主线？")
-        add(
-            "B",
-            "全文大致按「提出问题 → 给出方法与实验设计 → 报告结果 → 讨论局限与改进」推进。"
-            "引言负责立题与动机，方法章交代设计取舍，结果与讨论负责回答「做到了什么、还差什么」。",
-        )
+        if paper.algorithms:
+            a0 = paper.algorithms[0]
+            add("A", f"论文里还给了伪代码。我们能不能顺着 Algorithm {a0.id} 的流程走一遍？")
+            add(
+                "B",
+                f"可以。这段一共 {len(a0.lines)} 行，核心逻辑是："
+                + " ".join(textutil.condense(l, 80) for l in a0.lines[:5] if l.strip()),
+            )
 
-        add("A", "方法与实验设计方面，作者做了哪些关键安排？注意：我们只谈设计意图，不展开公式。")
-        add("B", " ".join(methods))
+        add("A", "那方法层面，最关键的设计是什么？")
+        add("B", "说白了，" + spoken(method_sents, 3))
 
-        add("A", "结果部分，作者希望读者抓住哪些结论性信息？同样不要逐图解读。")
-        add("B", " ".join(results))
+        if paper.tables:
+            tb = paper.tables[0]
+            add("A", f"效果怎么样？我看论文里表 {tb.id} 给了一堆数字。")
+            add("B", f"{self.explain_table(tb)} 这些数，后面复现时要一格一格对一下。")
 
-        add("A", "讨论与结论里，有哪些不足，或作者暗示的改进方向？")
-        add("B", " ".join(discussion))
+        if len(exp_sents) > 1:
+            add("A", "实验设置上有什么坑要注意吗？")
+            add("B", "嗯，有两个点得先说清楚。" + spoken(exp_sents, 2))
 
-        add("A", "如果作者要改下一版稿件，你会提醒他优先补强哪一块？")
-        add(
-            "B",
-            "优先检查：研究目的是否在引言里一句说清；方法章是否让人看懂实验设计的因果链；"
-            "结果是否直接回答引言提出的问题；讨论是否诚实写出局限与可改进点。这四块对齐，稿件主线就会更稳。",
-        )
+        add("A", "如果我自己动手复现，最难的地方在哪？")
+        if paper.code_refs:
+            add("B", "好消息是作者开源了。我们可以直接用它的仓库和数据跑通，"
+                     "把论文表格里的数当对照基准，难点主要在依赖版本对齐。")
+        elif paper.algorithms:
+            add("B", "作者没给完整代码，只有伪代码。得先把伪代码翻成能跑的代码，"
+                     "再按论文描述造小规模数据验证逻辑。注意，这只能验证逻辑对不对，验证不了指标对不对。")
+        else:
+            add("B", "这篇既没代码也没伪代码，只能照正文描述重建实验流程，"
+                     "复现结论的置信度会低一些，通常只能做到趋势一致。")
 
-        add("A", "好，今天的写作导读就到这里。下期见。")
-        add("B", "下期见。")
+        add("A", "最后聊聊局限，还有后续可能的方向？")
+        add("B", spoken(conc_sents, 2) or "论文自己也提到了一些局限，细节可以看原文的讨论部分。")
+        add("A", "好，今天就到这儿。感谢收听，我们下期再见。")
+        add("B", "再见。")
         return [x for x in tts if x["text"].strip()]
 
-    def _podcast_excerpt(self, paper: Paper, *kinds: str, head: str = "", n: int = 3) -> List[str]:
-        """抽取章节要点并尽量中文化；跳过公式/表格式噪声行。"""
-        text = (paper.section_text(*kinds) or "").strip()
-        if not text and kinds:
-            text = self._section_text_by_heading_hints(paper, kinds)
-        if not text:
-            text = (paper.abstract or "").strip()
-        cleaned_lines = []
-        for ln in text.splitlines():
-            s = ln.strip()
-            if not s:
-                continue
-            low = s.lower()
-            if low.startswith(("eq.", "equation", "fig.", "figure", "table ", "tab.")):
-                continue
-            if s.startswith("$$") or (s.count("=") >= 3 and len(s) < 120):
-                continue
-            cleaned_lines.append(s)
-        text = " ".join(cleaned_lines) if cleaned_lines else text
-        return self._bullets(text, head or "章节", n=n)
-
-    def _section_text_by_heading_hints(self, paper: Paper, kinds: tuple) -> str:
-        hints = {
-            "introduction": ("introduction", "引言", "背景"),
-            "background": ("introduction", "background", "背景"),
-            "method": ("method", "methods", "方法"),
-            "experiment": ("result", "results", "experiment", "结果"),
-            "results": ("result", "results", "结果"),
-            "discussion": ("discussion", "讨论"),
-            "conclusion": ("conclusion", "结论", "outlook", "展望"),
-        }
-        needles: List[str] = []
-        for k in kinds:
-            needles.extend(hints.get(k, (k,)))
-        chunks: List[str] = []
-        for sec in paper.sections:
-            h = (sec.heading or "").lower()
-            if any(n in h for n in needles):
-                if sec.text and sec.text.strip():
-                    chunks.append(sec.text.strip())
-        return "\n\n".join(chunks)
-
+    # ------------------------------------------------------------------ #
+    # 复现策略（离线规则版）
+    # ------------------------------------------------------------------ #
     def repro_strategy(self, paper: Paper, mode: str, targets: List[Dict[str, Any]]) -> str:
         from ..models import MODE_NO_CODE, MODE_OPEN_SOURCE, MODE_PSEUDOCODE
 
@@ -488,6 +416,9 @@ class OfflineProvider(LLMProvider):
             re.IGNORECASE,
         )
         src = [l.rstrip() for l in algo.lines]
+        # 归一化隐形字符（NBSP/零宽/连字）——参数表里的 NBSP 会让函数签名直接变成
+        # 语法错误，这是 PDF 抽取链路上最常见也最隐蔽的坑
+        src = [textutil.normalize_unicode(l) for l in src]
         src = [re.sub(r"^\s*(\d+[:.)]|\d+\s)\s*", "", l) for l in src]  # 去掉行号
         # 块首若残留标题行（如 "Algorithm 1: TOPK ..."），剔除，否则会成为非法 Python
         src = [l for l in src if not _title_re.match(l)]
@@ -518,6 +449,9 @@ class OfflineProvider(LLMProvider):
             if line.startswith("#"):
                 emit(line)
                 continue
+
+            # 赋值箭头归一化（含字体替换残渣 · / ⋅），必须在下面所有规则之前
+            line = _normalize_arrows(line)
 
             low = line.lower().rstrip(".;")
 

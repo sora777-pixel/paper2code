@@ -1,0 +1,12 @@
+# 插件配置（roadmap M5-④）
+#
+# 每一项是**可导入的 Python 模块名**。模块在被导入时调用 paper2code.plugins 的注册函数即可贡献能力：
+#
+#   from paper2code import plugins
+#   plugins.register_template({"name": "queueing", "label": "排队论", "hints": ("queue", "latency", "排队")})
+#   plugins.register_style({"name": "paper_blue", "palette": ["#1f4e79", "#2e75b6", "#9dc3e6"]})
+#   plugins.register_executor(MyRemoteExecutor())     # 需实现 available() / run(...)
+#
+# 插件导入失败不会拖垮主流程：只会记 warning 并在 `python -m paper2code plugins` 里显示。
+# 内置模板名不可被覆盖（避免破坏既有评测口径）；要覆盖请显式 overwrite=True 并自行承担回归风险。
+plugins: []

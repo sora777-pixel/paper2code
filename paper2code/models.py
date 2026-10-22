@@ -88,16 +88,6 @@ class Algorithm(_Base):
 
 
 @dataclass
-class Formula(_Base):
-    """论文中带编号、且正文有文字解释的公式。"""
-
-    id: str
-    number: str = ""
-    expression: str = ""
-    explanation: str = ""
-
-
-@dataclass
 class CodeRef(_Base):
     """论文中出现的代码 / 数据资源链接。情形 A 的判据。"""
 
@@ -105,6 +95,25 @@ class CodeRef(_Base):
     # repo（代码仓库）| dataset（数据集）| model（权重）| other
     kind: str = "repo"
     evidence: str = ""
+    # repo 的归属判定：own_code（本论文自有代码）| unclear（上下文不足）
+    # | third_party（被引用的第三方仓库 / awesome-list / 文献列表）
+    role: str = "unclear"
+    #: 归属判定的置信度（0–1），仅用于候选排序与报告展示
+    confidence: float = 0.0
+    #: GitHub ``/tree|blob/...`` 后面的子目录（克隆时只克隆仓库根）
+    subpath: str = ""
+    #: 判定依据（可追溯：命中了哪些正/负向线索）
+    role_reason: str = ""
+
+
+@dataclass
+class Formula(_Base):
+    """论文中编号的公式（保留 LaTeX），供 MVP 提示词与后期公式校验使用。"""
+
+    id: str
+    number: str = ""
+    expression: str = ""
+    explanation: str = ""
 
 
 @dataclass
@@ -124,8 +133,6 @@ class Paper(_Base):
     data_refs: List[CodeRef] = field(default_factory=list)
     raw_text: str = ""
     meta: Dict[str, Any] = field(default_factory=dict)
-    #: PDF parser backend used for this paper (pymupdf | docling | hybrid)
-    pdf_backend: str = "pymupdf"
 
     # -- 便捷查询 ---------------------------------------------------------- #
     def section_text(self, *kinds: str) -> str:
@@ -136,8 +143,18 @@ class Paper(_Base):
         skip = {"references", "appendix"}
         return [s for s in self.sections if s.kind not in skip and s.text.strip()]
 
+    def repo_candidates(self) -> List["CodeRef"]:
+        """可选仓库候选：自有代码优先，其次是上下文不足的链接，第三方引用排最后。"""
+        rank = {"own_code": 0, "unclear": 1, "third_party": 2}
+        refs = [r for r in self.code_refs if r.kind == "repo"]
+        refs.sort(key=lambda r: (rank.get(getattr(r, "role", "unclear"), 1),
+                                 -float(getattr(r, "confidence", 0.0) or 0.0)))
+        return refs
+
     def repo_urls(self) -> List[str]:
-        return [r.url for r in self.code_refs if r.kind == "repo"]
+        """可供情形 A 复用的仓库链接（**排除**被引用的第三方仓库）。"""
+        return [r.url for r in self.repo_candidates()
+                if getattr(r, "role", "unclear") != "third_party"]
 
 
 # --------------------------------------------------------------------------- #

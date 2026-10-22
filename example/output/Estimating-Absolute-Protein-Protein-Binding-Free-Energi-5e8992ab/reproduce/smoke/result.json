@@ -1,0 +1,17 @@
+{
+  "status": "failed",
+  "mode": "library",
+  "metrics": {},
+  "note": "代码路径 smoke（合成输入），不是论文数值复现",
+  "reason": "ModuleNotFoundError: No module named 'joblib'",
+  "traceback": "Traceback (most recent call last):\n  File \"./reproduce\\smoke\\run_smoke.py\", line 95, in main\n    mod = importlib.import_module(api[\"module\"])\n  File \"<python>/versions\\3.13.12\\Lib\\importlib\\__init__.py\", line 88, in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen importlib._bootstrap>\", line 1395, in _gcd_import\n  File \"<frozen importlib._bootstrap>\", line 1360, in _find_and_load\n  File \"<frozen importlib._bootstrap>\", line 1331, in _find_and_load_unlocked\n  File \"<frozen importlib._bootstrap>\", line 935, in _load_unlocked\n  File \"<frozen importlib._bootstrap_external>\", line 1023, in exec_module\n  File \"<frozen importlib._bootstrap>\", line 488, in _call_with_frames_removed\n  File \"./reproduce\\repo\\modules\\superlearner.py\", line 4, in <module>\n    import pickle, joblib\nModuleNotFoundError: No module named 'joblib'\n",
+  "status_label": "运行失败",
+  "entrypoint": "pbee.py",
+  "missing_dependencies": [
+    "pandas",
+    "pyrosetta",
+    "scipy",
+    "sklearn",
+    "xgboost"
+  ]
+}

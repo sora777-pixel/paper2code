@@ -1,0 +1,92 @@
+{
+  "paper_id": "Estimating-Absolute-Protein-Protein-Binding-Free-Energi-5e8992ab",
+  "mode": "open_source",
+  "mode_reason": "论文正文给出代码仓库链接，按「有开源代码」处理",
+  "strategy": "论文附带开源代码，复现的第一原则是**复用而非重写**：以仓库自带的脚本与数据为准，我们只在外部做环境隔离、种子固定、产物采集与逐格对标。判据是数字级一致（默认相对误差 ≤5% 记为 pass）。失败通常来自依赖版本漂移或未固定的随机性。\n\n【模型补充】先按README固定Python、Rosetta、PRODIGY环境与随机种子，跑通PBEE单结构流程；F1/F2用代码路径和日志核对，不重算。再从开源数据抽取Rosetta特征，按论文划分训练/验证/测试；在<1万条子集上用交叉验证重训10个基学习器与元学习器，固定子集与超参，生成F3回归散点、F4三数据集对比及性能表。F5在单机记录不同原子数的耗时与硬件；F6用同一模型计算SHAP图。主要风险：Rosetta许可/安装与算力、特征泄漏或预处理不一致、小子集使SL不稳定、PRODIGY基线缺失、SHAP与计时受版本/硬件影响。",
+  "targets": [
+    {
+      "kind": "figure",
+      "id": "F1",
+      "caption": "Schematic representation of the SL pipeline, which undergoes three steps. (A) The full training set is used to train 10 different ML",
+      "figure_kind": "architecture",
+      "role": "讲解引用"
+    },
+    {
+      "kind": "figure",
+      "id": "F2",
+      "caption": "PBEE flowchart for the protein-protein complex structure PDB ID 1XGU, corresponding to antibody (HyHEL-63) that binds to",
+      "figure_kind": "unknown",
+      "role": "讲解引用"
+    },
+    {
+      "kind": "figure",
+      "id": "F3",
+      "caption": "Regressions on the validation set using PRODIGY, Rosetta, and the trained ML and SL models (RMSE: root-mean-square error; R:",
+      "figure_kind": "unknown",
+      "role": "讲解引用"
+    },
+    {
+      "kind": "figure",
+      "id": "F4",
+      "caption": "Comparison of PBEE prediction accuracy by ML method to Rosetta and PRODIGY, for the three protein-protein complex data sets.",
+      "figure_kind": "plot",
+      "role": "图表重绘"
+    },
+    {
+      "kind": "figure",
+      "id": "F5",
+      "caption": "PBEE processing time as a function of the number of atoms",
+      "figure_kind": "unknown",
+      "role": "讲解引用"
+    },
+    {
+      "kind": "figure",
+      "id": "F6",
+      "caption": "Feature importance is based on SHAP-values. The violin",
+      "figure_kind": "unknown",
+      "role": "讲解引用"
+    },
+    {
+      "kind": "figure",
+      "id": "E1_173",
+      "caption": "",
+      "figure_kind": "embedded",
+      "role": "讲解引用"
+    }
+  ],
+  "inputs": {
+    "datasets": [],
+    "provided_data": [],
+    "local_code_path": "",
+    "code_refs": [
+      "https://github.com/chavesejf/",
+      "https://colab.research.google.com/drive/1lu1dC0yRltKK_Wp-gF26oHcZSCiHaI8b",
+      "https://github.com/chavesejf/PBEE",
+      "https://colab.research.google.com/drive/1lu1d-C0yRltKK_Wp-gF26oHcZSCiHaI8b",
+      "https://pubs.acs.org/10.1021/acs.jcim.4c01641"
+    ]
+  },
+  "steps": [
+    "定位代码仓库（论文包 code/ 目录优先，否则用正文链接浅克隆）",
+    "静态扫描仓库：入口脚本、依赖声明、数据文件、已有结果文件",
+    "生成隔离环境复现脚本 repro_run.sh（锁定依赖 + 固定随机种子）",
+    "在单机沙箱内执行入口脚本，采集 results/*.csv 等产物",
+    "把仓库产出与论文表格逐格对齐，计算相对误差并给出 pass/warn/fail",
+    "重绘论文中的图表，供人工目视比对"
+  ],
+  "scale_guard": {
+    "max_records": 10000,
+    "exec_timeout": 120,
+    "allow_network": false,
+    "random_seed": 0,
+    "rationale": "单机 MVP：全部计算在本地完成，单次执行数据量上限由 max_records 控制"
+  },
+  "scale_notes": [
+    "本次复现的数据规模上限：10000 条记录",
+    "单次执行超时：120s",
+    "架构预留：执行器（reproduce.runner）与计划（reproduce.planner）解耦，后续可替换为容器/集群后端而无需改动用例定义"
+  ],
+  "warnings": [
+    "论文中未抽取到任何表格，复现目标将退化为「算法/图表」层面。"
+  ]
+}

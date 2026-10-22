@@ -1,4 +1,4 @@
-"""语音合成入口。"""
+"""语音合成适配层。"""
 
 from .base import TTSEngine, get_tts  # noqa: F401
 

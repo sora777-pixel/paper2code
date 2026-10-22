@@ -1,0 +1,16 @@
+# pre-commit：提交前跑两道密钥闸门（roadmap M0-1）
+# 安装：pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.0
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: p2c-scan-secrets
+        name: paper2code 密钥扫描（纯标准库，零依赖）
+        entry: python tools/scan_secrets.py
+        language: system
+        pass_filenames: false
+        always_run: true

@@ -266,6 +266,50 @@ def translate(paper: Paper, algo: Algorithm, provider: Any) -> Tuple[str, str]:
     return raw, fn_name
 
 
+def repair_syntax(code: str, max_rounds: int = 60) -> Tuple[str, List[str]]:
+    """把编译不过的行降级成注释，保住其余可运行的行。
+
+    规则翻译器不可能覆盖论文伪代码的全部写法——``heap ← empty min-heap``
+    这种「自然语言右值」根本没法自动转成合法 Python。若放任不管，**一行翻不动
+    就让整个文件语法错误、整轮复现颗粒无收**，这个取舍明显不划算。
+
+    所以这里做一个收敛的修复循环：反复 ``compile``，把报错行注释掉，直到通过
+    或达到轮次上限。返回 ``(修好的源码, 被注释掉的行清单)``——清单要暴露给用户，
+    不能悄悄吞掉。
+    """
+    notes: List[str] = []
+    touched: set = set()
+    for _ in range(max_rounds):
+        try:
+            compile(code, "<p2c>", "exec")
+            return code, notes
+        except SyntaxError as exc:
+            lines = code.splitlines()
+            if not lines:
+                return code, notes
+            start = min(max((exc.lineno or 1) - 1, 0), len(lines) - 1)
+            # 从报错行往上找「可注释」的行：跳过空行、注释、以及已经处理过的行。
+            # 往上找是因为 IndentationError 常常报在块体上，真正的坏行是块首。
+            idx = -1
+            for probe in range(start, max(-1, start - 8), -1):
+                if probe in touched:
+                    continue
+                text = lines[probe].strip()
+                if not text or text.startswith("#"):
+                    continue
+                idx = probe
+                break
+            if idx < 0:
+                return code, notes  # 收敛不了就交回调用方，避免死循环
+            original = lines[idx]
+            indent = original[: len(original) - len(original.lstrip())]
+            lines[idx] = f"{indent}# [p2c 未能翻译] {original.strip()}"
+            notes.append(original.strip())
+            touched.add(idx)
+            code = "\n".join(lines)
+    return code, notes
+
+
 def build_executable(
     code: str,
     algo: Algorithm,
@@ -286,7 +330,10 @@ def build_executable(
         .replace("__P2C_SEED__", str(seed))
         .replace("__P2C_FN__", fn_name)
     )
-    return script, fn_name, {"kind": kind, "n": len(data), "seed": seed}
+    # 最后一道闸：在「真正会被写盘并执行的那份源码」上做语法修复，
+    # 这样骨架自身的问题也能被兜住。
+    script, repairs = repair_syntax(script)
+    return script, fn_name, {"kind": kind, "n": len(data), "seed": seed, "repairs": repairs}
 
 
 def parse_result(stdout: str) -> Optional[Dict[str, Any]]:
@@ -307,8 +354,13 @@ def execute_pseudocode(
     timeout: int = 120,
     n_records: Optional[int] = None,
     seed: int = 0,
+    trusted: Optional[bool] = None,
 ) -> PseudocodeRun:
-    """完整跑一遍：翻译 → 装骨架 → 执行 → 回收结果。"""
+    """完整跑一遍：翻译 → 装骨架 → 执行 → 回收结果。
+
+    ``trusted``：翻译产物来自 ``OfflineProvider``（本仓库确定性翻译器）时为 True——跳过
+    静态扫描；接真实 LLM 时为 False——生成代码必须先过扫描（M4-①）。
+    """
     from ..config import get_settings
 
     settings = get_settings()
@@ -323,7 +375,10 @@ def execute_pseudocode(
     script_path = work_dir / f"{algo.id}_main.py"
     script_path.write_text(script, encoding="utf-8")
 
-    res = runner.run_python_script(script_path, work_dir, timeout=timeout, allow_network=False)
+    if trusted is None:
+        trusted = getattr(provider, "name", "") == "offline"
+    res = runner.run_python_script(script_path, work_dir, timeout=timeout, allow_network=False,
+                                   trusted=trusted)
     parsed = parse_result(res.stdout)
 
     out = PseudocodeRun(

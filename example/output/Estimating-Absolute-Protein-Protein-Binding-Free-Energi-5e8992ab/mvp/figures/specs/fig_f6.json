@@ -1,0 +1,18 @@
+{
+  "id": "fig_f6",
+  "paper_ref": "Figure 6",
+  "caption": "Feature importance is based on SHAP-values. The violin",
+  "kind": "bar",
+  "reproducibility": "not_reproducible",
+  "data_keys": [],
+  "axes": {},
+  "series": [],
+  "chart": null,
+  "layout": "1x1",
+  "style_notes": "",
+  "diagram": null,
+  "mermaid": null,
+  "demo_change_needed": "需要真实实验数据；可让 demo 写出对应曲线/扫参结果（见 plan.required_outputs）后再绘制",
+  "source_note": "",
+  "original_image": "./figures/p06_x343.png"
+}

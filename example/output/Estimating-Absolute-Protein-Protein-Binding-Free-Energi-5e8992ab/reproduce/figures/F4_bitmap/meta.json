@@ -1,0 +1,698 @@
+{
+  "state": "ok",
+  "figure": "F4",
+  "source_image": "./figures/p04_x288.png",
+  "image_size": [
+    2092,
+    659
+  ],
+  "disclaimer": "从 PDF 中读取或识别的数值不等同于原文献数值（位图反推，仅供绘图对照）",
+  "panels": [
+    {
+      "frame": [
+        118,
+        687,
+        32,
+        598
+      ],
+      "kind": "bar",
+      "orientation": "h",
+      "x_axis": {
+        "scale_ok": true,
+        "score": 0.98,
+        "ticks": [
+          [
+            118.0,
+            0.0
+          ],
+          [
+            232.0,
+            0.2
+          ],
+          [
+            345.0,
+            0.4
+          ],
+          [
+            460.0,
+            0.6
+          ],
+          [
+            573.0,
+            0.8
+          ],
+          [
+            686.0,
+            1.0
+          ]
+        ],
+        "note": ""
+      },
+      "y_axis": {
+        "scale_ok": false,
+        "score": 0.0,
+        "ticks": [
+          [
+            54.0,
+            9000.897
+          ],
+          [
+            98.0,
+            8056168.0
+          ],
+          [
+            142.0,
+            8.0
+          ],
+          [
+            185.0,
+            50.0
+          ],
+          [
+            228.0,
+            59.0
+          ],
+          [
+            272.0,
+            7.0
+          ],
+          [
+            315.0,
+            80.0
+          ],
+          [
+            358.0,
+            40.0
+          ],
+          [
+            402.0,
+            86.0
+          ],
+          [
+            446.0,
+            85.0
+          ],
+          [
+            489.0,
+            5.0
+          ],
+          [
+            532.0,
+            88.0
+          ]
+        ],
+        "note": "刻度值非单调，识别不可靠"
+      },
+      "bars": [
+        {
+          "orientation": "h",
+          "center": 54,
+          "right_px": 245,
+          "axis": "x",
+          "value": 0.224,
+          "confidence": 0.98
+        },
+        {
+          "orientation": "h",
+          "center": 98,
+          "right_px": 155,
+          "axis": "x",
+          "value": 0.065,
+          "confidence": 0.98
+        },
+        {
+          "orientation": "h",
+          "center": 141,
+          "right_px": 432,
+          "axis": "x",
+          "value": 0.553,
+          "confidence": 0.98
+        },
+        {
+          "orientation": "h",
+          "center": 185,
+          "right_px": 623,
+          "axis": "x",
+          "value": 0.889,
+          "confidence": 0.98
+        },
+        {
+          "orientation": "h",
+          "center": 228,
+          "right_px": 475,
+          "axis": "x",
+          "value": 0.629,
+          "confidence": 0.98
+        },
+        {
+          "orientation": "h",
+          "center": 272,
+          "right_px": 476,
+          "axis": "x",
+          "value": 0.63,
+          "confidence": 0.98
+        },
+        {
+          "orientation": "h",
+          "center": 315,
+          "right_px": 553,
+          "axis": "x",
+          "value": 0.766,
+          "confidence": 0.98
+        },
+        {
+          "orientation": "h",
+          "center": 359,
+          "right_px": 564,
+          "axis": "x",
+          "value": 0.785,
+          "confidence": 0.98
+        },
+        {
+          "orientation": "h",
+          "center": 402,
+          "right_px": 584,
+          "axis": "x",
+          "value": 0.82,
+          "confidence": 0.98
+        },
+        {
+          "orientation": "h",
+          "center": 446,
+          "right_px": 580,
+          "axis": "x",
+          "value": 0.813,
+          "confidence": 0.98
+        },
+        {
+          "orientation": "h",
+          "center": 490,
+          "right_px": 607,
+          "axis": "x",
+          "value": 0.861,
+          "confidence": 0.98
+        },
+        {
+          "orientation": "h",
+          "center": 533,
+          "right_px": 473,
+          "axis": "x",
+          "value": 0.625,
+          "confidence": 0.98
+        },
+        {
+          "orientation": "h",
+          "center": 576,
+          "right_px": 606,
+          "axis": "x",
+          "value": 0.859,
+          "confidence": 0.98
+        }
+      ],
+      "points": [],
+      "style": {
+        "colors": [
+          "#ebf2f8",
+          "#dee9f3",
+          "#d2e0ed",
+          "#c0d5e5",
+          "#accadb",
+          "#93bbd2",
+          "#78aac8",
+          "#629abe",
+          "#4e8ab3",
+          "#3c78a8",
+          "#2c669b",
+          "#1e558d",
+          "#184477"
+        ],
+        "gradient": {
+          "direction": "lighten_down",
+          "from": "#ebf2f8",
+          "to": "#184477",
+          "axis": "vertical",
+          "note": "同一色板按柱序由浅到深（与原文一致）"
+        }
+      },
+      "confidence": 0.98,
+      "notes": [
+        "刻度值非单调，识别不可靠"
+      ]
+    },
+    {
+      "frame": [
+        813,
+        1383,
+        32,
+        598
+      ],
+      "kind": "bar",
+      "orientation": "h",
+      "x_axis": {
+        "scale_ok": true,
+        "score": 0.99,
+        "ticks": [
+          [
+            814.0,
+            0.0
+          ],
+          [
+            927.0,
+            0.2
+          ],
+          [
+            1040.0,
+            0.4
+          ],
+          [
+            1154.0,
+            0.6
+          ],
+          [
+            1268.0,
+            0.8
+          ],
+          [
+            1382.0,
+            1.0
+          ]
+        ],
+        "note": ""
+      },
+      "y_axis": {
+        "scale_ok": false,
+        "score": 0.0,
+        "ticks": [
+          [
+            54.0,
+            9000.897
+          ],
+          [
+            98.0,
+            8056118.0
+          ],
+          [
+            142.0,
+            8.0
+          ],
+          [
+            185.0,
+            50.0
+          ],
+          [
+            228.0,
+            59.0
+          ],
+          [
+            272.0,
+            7.0
+          ],
+          [
+            315.0,
+            80.0
+          ],
+          [
+            358.0,
+            40.0
+          ],
+          [
+            402.0,
+            80.0
+          ],
+          [
+            446.0,
+            86.0
+          ],
+          [
+            489.0,
+            57.0
+          ],
+          [
+            532.0,
+            88.0
+          ]
+        ],
+        "note": "刻度值非单调，识别不可靠"
+      },
+      "bars": [
+        {
+          "orientation": "h",
+          "center": 54,
+          "right_px": 910,
+          "axis": "x",
+          "value": 0.169,
+          "confidence": 0.99
+        },
+        {
+          "orientation": "h",
+          "center": 98,
+          "right_px": 873,
+          "axis": "x",
+          "value": 0.104,
+          "confidence": 0.99
+        },
+        {
+          "orientation": "h",
+          "center": 141,
+          "right_px": 1173,
+          "axis": "x",
+          "value": 0.632,
+          "confidence": 0.99
+        },
+        {
+          "orientation": "h",
+          "center": 185,
+          "right_px": 1140,
+          "axis": "x",
+          "value": 0.574,
+          "confidence": 0.99
+        },
+        {
+          "orientation": "h",
+          "center": 228,
+          "right_px": 869,
+          "axis": "x",
+          "value": 0.097,
+          "confidence": 0.99
+        },
+        {
+          "orientation": "h",
+          "center": 272,
+          "right_px": 1056,
+          "axis": "x",
+          "value": 0.426,
+          "confidence": 0.99
+        },
+        {
+          "orientation": "h",
+          "center": 315,
+          "right_px": 1071,
+          "axis": "x",
+          "value": 0.452,
+          "confidence": 0.99
+        },
+        {
+          "orientation": "h",
+          "center": 359,
+          "right_px": 1134,
+          "axis": "x",
+          "value": 0.563,
+          "confidence": 0.99
+        },
+        {
+          "orientation": "h",
+          "center": 402,
+          "right_px": 1171,
+          "axis": "x",
+          "value": 0.629,
+          "confidence": 0.99
+        },
+        {
+          "orientation": "h",
+          "center": 446,
+          "right_px": 1182,
+          "axis": "x",
+          "value": 0.648,
+          "confidence": 0.99
+        },
+        {
+          "orientation": "h",
+          "center": 490,
+          "right_px": 1204,
+          "axis": "x",
+          "value": 0.687,
+          "confidence": 0.99
+        },
+        {
+          "orientation": "h",
+          "center": 533,
+          "right_px": 1153,
+          "axis": "x",
+          "value": 0.597,
+          "confidence": 0.99
+        },
+        {
+          "orientation": "h",
+          "center": 576,
+          "right_px": 1199,
+          "axis": "x",
+          "value": 0.678,
+          "confidence": 0.99
+        }
+      ],
+      "points": [],
+      "style": {
+        "colors": [
+          "#ebf2f8",
+          "#dee9f3",
+          "#d2e0ed",
+          "#c0d5e5",
+          "#accadb",
+          "#93bbd2",
+          "#78aac8",
+          "#629abe",
+          "#4e8ab3",
+          "#3c78a8",
+          "#2c669b",
+          "#1e558d",
+          "#184477"
+        ],
+        "gradient": {
+          "direction": "lighten_down",
+          "from": "#ebf2f8",
+          "to": "#184477",
+          "axis": "vertical",
+          "note": "同一色板按柱序由浅到深（与原文一致）"
+        }
+      },
+      "confidence": 0.99,
+      "notes": [
+        "刻度值非单调，识别不可靠"
+      ]
+    },
+    {
+      "frame": [
+        1508,
+        2078,
+        32,
+        598
+      ],
+      "kind": "bar",
+      "orientation": "h",
+      "x_axis": {
+        "scale_ok": true,
+        "score": 0.97,
+        "ticks": [
+          [
+            1532.0,
+            -0.2
+          ],
+          [
+            1622.0,
+            0.0
+          ],
+          [
+            1714.0,
+            0.2
+          ],
+          [
+            1804.0,
+            0.4
+          ],
+          [
+            1895.0,
+            0.6
+          ],
+          [
+            1986.0,
+            0.8
+          ],
+          [
+            2078.0,
+            1.0
+          ]
+        ],
+        "note": ""
+      },
+      "y_axis": {
+        "scale_ok": false,
+        "score": 0.0,
+        "ticks": [
+          [
+            54.0,
+            8000.807
+          ],
+          [
+            98.0,
+            9056118.0
+          ],
+          [
+            185.0,
+            50.0
+          ],
+          [
+            228.0,
+            59.0
+          ],
+          [
+            272.0,
+            7.0
+          ],
+          [
+            315.0,
+            80.0
+          ],
+          [
+            358.0,
+            40.0
+          ],
+          [
+            402.0,
+            86.0
+          ],
+          [
+            446.0,
+            86.0
+          ],
+          [
+            489.0,
+            57.0
+          ],
+          [
+            532.0,
+            88.0
+          ]
+        ],
+        "note": "刻度值非单调，识别不可靠"
+      },
+      "bars": [
+        {
+          "orientation": "h",
+          "center": 54,
+          "right_px": 1529,
+          "axis": "x",
+          "value": -0.207,
+          "confidence": 0.97
+        },
+        {
+          "orientation": "h",
+          "center": 141,
+          "right_px": 1929,
+          "axis": "x",
+          "value": 0.673,
+          "confidence": 0.97
+        },
+        {
+          "orientation": "h",
+          "center": 185,
+          "right_px": 1918,
+          "axis": "x",
+          "value": 0.648,
+          "confidence": 0.97
+        },
+        {
+          "orientation": "h",
+          "center": 228,
+          "right_px": 1833,
+          "axis": "x",
+          "value": 0.462,
+          "confidence": 0.97
+        },
+        {
+          "orientation": "h",
+          "center": 272,
+          "right_px": 1848,
+          "axis": "x",
+          "value": 0.495,
+          "confidence": 0.97
+        },
+        {
+          "orientation": "h",
+          "center": 315,
+          "right_px": 1704,
+          "axis": "x",
+          "value": 0.178,
+          "confidence": 0.97
+        },
+        {
+          "orientation": "h",
+          "center": 359,
+          "right_px": 1578,
+          "axis": "x",
+          "value": -0.099,
+          "confidence": 0.97
+        },
+        {
+          "orientation": "h",
+          "center": 446,
+          "right_px": 1670,
+          "axis": "x",
+          "value": 0.103,
+          "confidence": 0.97
+        },
+        {
+          "orientation": "h",
+          "center": 490,
+          "right_px": 1863,
+          "axis": "x",
+          "value": 0.527,
+          "confidence": 0.97
+        },
+        {
+          "orientation": "h",
+          "center": 533,
+          "right_px": 1706,
+          "axis": "x",
+          "value": 0.182,
+          "confidence": 0.97
+        },
+        {
+          "orientation": "h",
+          "center": 576,
+          "right_px": 1908,
+          "axis": "x",
+          "value": 0.626,
+          "confidence": 0.97
+        }
+      ],
+      "points": [],
+      "style": {
+        "colors": [
+          "#ebf2f8",
+          "#d2e0ed",
+          "#c0d5e5",
+          "#accadb",
+          "#93bbd2",
+          "#78aac8",
+          "#4e7a97",
+          "#3c78a8",
+          "#2c669b",
+          "#1e558d",
+          "#184477"
+        ],
+        "gradient": {
+          "direction": "lighten_down",
+          "from": "#ebf2f8",
+          "to": "#184477",
+          "axis": "vertical",
+          "note": "同一色板按柱序由浅到深（与原文一致）"
+        }
+      },
+      "confidence": 0.97,
+      "notes": [
+        "刻度值非单调，识别不可靠"
+      ]
+    }
+  ],
+  "confidence": 0.97,
+  "notes": [
+    "刻度值非单调，识别不可靠"
+  ],
+  "files": {
+    "meta": "./reproduce/figures/F4_bitmap/meta.json",
+    "csv": "./reproduce/figures/F4_bitmap/data.csv",
+    "style": "./reproduce/figures/F4_bitmap/style.json",
+    "script": "./reproduce/figures/F4_bitmap/draw_F4.py",
+    "preview": "./reproduce/figures/F4_bitmap/preview_F4.png"
+  }
+}

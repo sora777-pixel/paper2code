@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "updated_at": "2026-10-20",
+  "revision_note": "M2-1（解析与图表保真）修正 L2 期望值：sections_min/tables_min 的旧值（6/5/2 与 10/3）是分页标记假章节与 pdfplumber text 策略「版面糊」的计数，已作废并改为按实测真值标注（详见各条 annotation_note）。",
+  "note": "最小评测集（roadmap M1-①）。L1=自建合成样本（回归基线，确定性）；L2=真实论文（真实退化，允许低分但必须显示、禁止求平均掩盖）。expect.*_min 是「应至少抽到多少」的人工标注；verdict/mode 为期望值，null 表示不作断言。required_outputs 只在启用 LLM 路径（mvp 会产出真实 metrics.json）时才可校验，离线路径记为 n/a。",
+  "entries": [
+    {
+      "id": "01_open_source",
+      "suite": "L1-synthetic",
+      "source": "samples/01_open_source",
+      "expect": {
+        "mode": "open_source",
+        "sections_min": 10,
+        "tables_min": 3,
+        "figures_min": 1,
+        "algorithms_min": 1,
+        "code_refs_min": 1,
+        "verdict": "consistent",
+        "required_outputs": []
+      },
+      "annotation": {
+        "core_mechanism": "锚点谱主题发现（AS-Topic）：用锚点词约束非负矩阵分解，在短文本上做主题聚类",
+        "expected_figures": ["Figure 1 聚类性能对比（Accuracy/NMI/ARI 分组柱状）"],
+        "qualitative_conclusion": "AS-Topic 在 Accuracy/NMI/ARI 三项上均优于 K-Means/NMF/BERTopic",
+        "fidelity_score": 2
+      }
+    },
+    {
+      "id": "02_no_code",
+      "suite": "L1-synthetic",
+      "source": "samples/02_no_code",
+      "expect": {
+        "mode": "no_code",
+        "sections_min": 10,
+        "tables_min": 3,
+        "figures_min": 1,
+        "algorithms_min": 0,
+        "code_refs_min": 0,
+        "verdict": "consistent",
+        "required_outputs": []
+      },
+      "annotation": {
+        "core_mechanism": "边缘 CDN 缓存命中率的经验分解（请求份额 vs 字节份额）",
+        "expected_figures": ["Figure 1 请求份额 vs 字节份额（分组柱状）"],
+        "qualitative_conclusion": "视频类只占 7.1% 的请求，却占 68.4% 的字节",
+        "fidelity_score": 2
+      }
+    },
+    {
+      "id": "03_pseudocode",
+      "suite": "L1-synthetic",
+      "source": "samples/03_pseudocode",
+      "expect": {
+        "mode": "pseudocode_only",
+        "sections_min": 10,
+        "tables_min": 1,
+        "figures_min": 1,
+        "algorithms_min": 1,
+        "code_refs_min": 0,
+        "verdict": "consistent",
+        "required_outputs": []
+      },
+      "annotation": {
+        "core_mechanism": "单遍常数内存的流式 Top-K 选择，抗对抗性分数流",
+        "expected_figures": ["Figure 1 STREAMTOPK 相对朴素基线的吞吐"],
+        "qualitative_conclusion": "快速路径带来约 3 倍加速",
+        "fidelity_score": 2
+      }
+    },
+    {
+      "id": "01_hsp70_bag2",
+      "suite": "L2-real",
+      "source": "_test_paper/01_hsp70_bag2",
+      "expect": {
+        "mode": "no_code",
+        "sections_min": 6,
+        "tables_min": 4,
+        "figures_min": 12,
+        "algorithms_min": 0,
+        "code_refs_min": 0,
+        "verdict": "consistent",
+        "required_outputs": []
+      },
+      "annotation": {
+        "core_mechanism": "深度学习驱动的肽设计 + 分子模拟，破坏 Hsp70.14–BAG2 的蛋白-蛋白相互作用",
+        "expected_figures": ["Hsp70.14 3D 结构验证", "HADDOCK 打分", "RMSD/Rg/SASA 等 MD 标准图集"],
+        "qualitative_conclusion": "设计的肽能够结合并破坏 Hsp70.14–BAG2 界面",
+        "fidelity_score": 1,
+        "annotation_source": "人工初判（2026-10-20），待你复核",
+        "annotation_note": "tables_min 由 10 修正为 4：旧值 10 来自 pdfplumber text 策略把双栏版面切成的「版面糊」计数（实测为整页列切片、数值占比 0），已作废；4 = 实测可确认的表题数（Table 1–4，见 p7/p10）。当前解析器抽到 0 张，故本项仍应显示为未命中，这是真实缺口。"
+      }
+    },
+    {
+      "id": "02_pbee_superlearner",
+      "suite": "L2-real",
+      "source": "_test_paper/02_pbee_superlearner",
+      "expect": {
+        "mode": "open_source",
+        "sections_min": 5,
+        "tables_min": 1,
+        "figures_min": 6,
+        "algorithms_min": 0,
+        "code_refs_min": 1,
+        "verdict": "consistent",
+        "required_outputs": []
+      },
+      "annotation": {
+        "core_mechanism": "用廉价的 Rosetta 能量项 + 集成学习（super learner）逼近绝对蛋白-蛋白结合自由能 ΔG",
+        "expected_figures": ["SL pipeline 示意", "PBEE flowchart", "验证集回归散点"],
+        "qualitative_conclusion": "PBEE 仅用少量廉价特征即可逼近昂贵的增强采样 ΔG",
+        "fidelity_score": 1,
+        "annotation_source": "人工初判（2026-10-20），待你复核",
+        "annotation_note": "tables_min 由 3 修正为 1：旧值 3 来自 text 策略的版面糊计数，已作废；1 = 正文实测题注 Table 1（Size of Nonredundant Data Set，p2/p3）。当前解析器抽到 0 张，本项仍应显示为未命中。"
+      }
+    },
+    {
+      "id": "03_pbee_si",
+      "suite": "L2-real",
+      "source": "_test_paper/03_pbee_si",
+      "expect": {
+        "mode": "no_code",
+        "sections_min": 0,
+        "tables_min": 3,
+        "figures_min": 0,
+        "algorithms_min": 0,
+        "code_refs_min": 0,
+        "verdict": "consistent",
+        "required_outputs": []
+      },
+      "annotation": {
+        "core_mechanism": "上述论文的补充材料（以表格为主，含与正文一致的基准数值）",
+        "expected_figures": [],
+        "qualitative_conclusion": "SI 表格数值与正文结论一致（作为正文抽取失败时的对照）",
+        "fidelity_score": 1,
+        "annotation_source": "人工初判（2026-10-20），待你复核",
+        "annotation_note": "sections_min 由 2 修正为 0：旧值 2 来自分页标记假章节，已作废；SI 是纯数据附件，本就没有语义章节，也不设章节期望。tables_min=3 保留（实测抽到 4 张：术语表 ×3 + RMSE 数值表 ×1）。"
+      }
+    }
+  ]
+}

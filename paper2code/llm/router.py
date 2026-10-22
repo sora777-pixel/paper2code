@@ -37,6 +37,30 @@ class FallbackProvider(LLMProvider):
         state = "degraded->offline" if self.degraded else "remote"
         return f"auto({self.primary.describe()}, {state})"
 
+    # -- 成本护栏：用量与触发事实都从 primary 取（真正花钱的是它） -------- #
+    def attach_budget(self, budget) -> None:
+        super().attach_budget(budget)
+        if hasattr(self.primary, "attach_budget"):
+            self.primary.attach_budget(budget)
+
+    def reset_run(self) -> None:
+        super().reset_run()
+        self.degraded = False
+        if hasattr(self.primary, "reset_run"):
+            self.primary.reset_run()
+        if hasattr(self.fallback, "reset_run"):
+            self.fallback.reset_run()
+
+    def get_usage(self):
+        return self.primary.get_usage() if hasattr(self.primary, "get_usage") else super().get_usage()
+
+    def budget_tripped(self) -> str:
+        if hasattr(self.primary, "budget_tripped"):
+            got = self.primary.budget_tripped()
+            if got:
+                return got
+        return super().budget_tripped()
+
     def _call(self, method: str, *args: Any, **kwargs: Any) -> Any:
         if self.degraded or not self.primary.available():
             return getattr(self.fallback, method)(*args, **kwargs)
@@ -68,6 +92,10 @@ class FallbackProvider(LLMProvider):
 
     def explain_table(self, table: Table) -> str:
         return self._call("explain_table", table)
+
+    # MVP-PATCH:llm-router
+    def complete(self, system: str, user: str, stage: str = "") -> str:
+        return self._call("complete", system, user, stage)
 
 
 def get_provider(refresh: bool = False) -> LLMProvider:

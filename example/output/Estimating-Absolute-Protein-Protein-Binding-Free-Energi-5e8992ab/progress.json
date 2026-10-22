@@ -1,0 +1,47 @@
+{
+  "paper_id": "Estimating-Absolute-Protein-Protein-Binding-Free-Energi-5e8992ab",
+  "updated_at": "2026-10-22T19:49:44",
+  "resume": false,
+  "current": "",
+  "failed": [],
+  "reused": [],
+  "stages": [
+    {
+      "name": "explain",
+      "status": "done",
+      "elapsed_s": 126.06,
+      "note": "",
+      "artifacts": [
+        "./explain/courseware.html",
+        "./explain/podcast_script.md",
+        "./explain/podcast.wav"
+      ],
+      "started_at": "2026-10-22T19:38:08",
+      "finished_at": "2026-10-22T19:40:14"
+    },
+    {
+      "name": "reproduce",
+      "status": "done",
+      "elapsed_s": 62.31,
+      "note": "",
+      "artifacts": [
+        "./reproduce/repro_report.md"
+      ],
+      "started_at": "2026-10-22T19:40:14",
+      "finished_at": "2026-10-22T19:41:16"
+    },
+    {
+      "name": "mvp",
+      "status": "done",
+      "elapsed_s": 507.57,
+      "note": "",
+      "artifacts": [
+        "./mvp/MVP_REPORT.md",
+        "./mvp/figures/FIGURES.md"
+      ],
+      "started_at": "2026-10-22T19:41:16",
+      "finished_at": "2026-10-22T19:49:44"
+    }
+  ],
+  "notes": []
+}

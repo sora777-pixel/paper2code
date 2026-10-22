@@ -1,0 +1,337 @@
+{
+  "framework": "numpy",
+  "core_idea_to_implement": "实现论文的 Super Learner(SL) 堆叠机制：使用 10 个异构候选学习器（8 个同名实现 + 2 个同族代理），在 427 个合成训练样本上做 10 折 K-fold，收集 out-of-fold(OOF) 预测构成 Z(427×10)；用加权线性回归元模型 m(z;β) 拟合 Z→ΔG0（论文只写 weighted linear regression；若非负/权重归一保留，必须标注为可解释性附加约束）；用全训练集重训 10 个基学习器并用 β 加权组合；在 105 个同生成器留出样本上评估 RMSE/Pearson R，并与单模型、简单平均、无 OOF 堆叠等对比。另生成按数据库分组的误差、置换重要性和原子数计时等分析图/指标，但这些在合成数据中只能演示流程，其定性结论由生成器预设，不构成论文 Figure 3/4/6 或真实 external validation 的复现。",
+  "faithful_parts": [
+    "10 个候选学习器：8 个同名实现（AdaBoost.R2、bagging、decision tree、elastic net、extra trees、kNN、linear regression、random forest）+ 2 个同族代理（平方损失梯度提升代 XGBoost、线性 ε-SVR 代 RBF 核 SVR）；代理明确标注，不称“与论文一致”。",
+    "10 折 K-fold out-of-fold 预测矩阵 Z(427×10) 作为元特征，对应论文 Figure 1B 的 out-of-fold predictions stored as covariance matrix。",
+    "元模型 m(z;β) 使用基学习器输出的加权线性回归；若实现非负/权重归一，仅作为可解释性附加约束，论文未明确要求。",
+    "全训练集重训 10 个基学习器，并用元权重加权组合生成验证集预测。",
+    "按论文 Table 1 的数据库构成做 427/105 切分（PDBbind 366/90、PRODIGY 2/0、SKEMPI2 14/7、Benchmark5.5 45/8）；在合成数据上实现，留出集来自同一生成器，不是真实跨数据库 external validation。",
+    "运行完整 SL 流程并报告 SL 与单模型的 RMSE/Pearson R，用于比较堆叠与单模型/简单平均。"
+  ],
+  "simplified_parts": [
+    {
+      "what": "蛋白质结构与 Rosetta 全部前/后处理（缺口补齐、加氢、几何优化、InterfaceAnalyzerMover 等）",
+      "why": "环境无 PyRosetta，且真实 PDB 数据与分钟级计算无法在 60 s CPU 玩具 demo 中复现",
+      "how": "直接用低维潜变量 u1..u6 与噪声合成 52 维界面描述符；结构相关的接触面积、氢键、SASA、packstat 之间仅保留论文描述的粗略相关结构，并非真实 Rosetta 描述符。"
+    },
+    {
+      "what": "实验 ΔG0 数据（PDBbind/SKEMPI2/Benchmark 的真实亲和力）",
+      "why": "需要 532 个真实复合物的实验标签，无法离线打包",
+      "how": "ΔG0 = -8.2 + 2.45u1 + 1.55u2 - 1.15u3 + 0.85u1u2 + 0.6u4 + N(0,1.5)，加入交互项使树模型有机会优于线性模型，噪声水平模仿实验标准差。"
+    },
+    {
+      "what": "SVR 的 RBF 核与 XGBoost 的二阶树算法",
+      "why": "纯 numpy 下核 SVR 需解 QP；XGBoost 库不可用",
+      "how": "SVR 用线性 ε-不敏感损失的次梯度下降（300 步）；XGBoost 用平方损失梯度提升（lr=0.1, depth=3, 25 轮）作为同族代理，并明确标注为代理。"
+    },
+    {
+      "what": "SHAP(SHapley Additive exPlanations) 值",
+      "why": "精确 Shapley 值对 52 特征 × 10 模型不可行",
+      "how": "改用验证集上的置换重要性（RMSE 增量，3 次重复）作为特征贡献的定性代理；Figure 6 只能演示重要性计算流程，排序由合成生成器预设，不构成对论文 Figure 6 的复现。"
+    },
+    {
+      "what": "PRODIGY 与 Rosetta 的真实打分函数",
+      "why": "两者均为外部软件",
+      "how": "PRODIGY 用潜变量线性式 + 数据库相关偏移（PDBbind 0, SKEMPI2 +1.7, Benchmark -1.5）模拟其跨数据集退化；Rosetta 用与 ΔG0 无关的高斯噪声模拟其无相关性；基线结论由生成器预设，仅演示对比图表与指标计算，不作为复现 Figure 3/4 的证据。"
+    },
+    {
+      "what": "PBEE 的原子级运行时间（Figure 5）",
+      "why": "无 Rosetta，真实流水线时间无法测量",
+      "how": "生成两团合成原子坐标，真实计时计算界面接触对（分块距离矩阵），得到时间随原子数超线性增长的真实但小尺度曲线（毫秒级，非分钟级）；属于补充演示，不可类比 Figure 5。"
+    },
+    {
+      "what": "超参数调优与数据集去冗余/界面相似性人工排查",
+      "why": "论文的调优过程成本高，且合成数据无同源冗余问题",
+      "how": "固定一组浅层、正则化的超参数（树深 6-7、bagging/RF/ET 各 20 棵、提升 25 轮），不做网格搜索；不实现界面相似性人工排查。"
+    },
+    {
+      "what": "Figure 3/4/6 的定性结论",
+      "why": "合成生成器把 cms_contact/ifa_dG/ifa_* 内联到 u1..u3，把 Rosetta 定义为与 ΔG0 无关噪声，把 PRODIGY 加上数据库 offset；因此 Rosetta 无相关、PRODIGY 跨数据集退化、cms/ifa 主导重要性都是构造保证的，不是 SL 机制从真实 Rosetta 描述符中涌现的结论",
+      "how": "在计划与输出中明确标注：这些图/指标只演示计算流程；不将生成器保证的排序或相关性作为复现论文结论的证据。"
+    },
+    {
+      "what": "所谓 external validation",
+      "why": "105 个验证样本与训练集出自同一合成生成器、同分布，并非论文意义上跨数据库来源的外推验证",
+      "how": "保留 427/105 分层切分与 Table 1 的数据库计数标签，但明确声明这只是同分布 holdout；不宣称复现 external validation。"
+    },
+    {
+      "what": "52 维 Rosetta 描述符的真实物理相关结构与冗余",
+      "why": "合成数据仅由 6 个潜变量驱动全部 52 个特征，真实 52 维 Rosetta 描述符之间的相关/冗余被完全替换",
+      "how": "明确声明 SL 的模型多样性、权重分配与“SL≈最佳单模型”行为不能代表真实 52 维特征场景；结果只用于演示堆叠机制。"
+    },
+    {
+      "what": "学习曲线、meta_strategy 消融、毫秒级原子-时间曲线",
+      "why": "论文没有学习曲线、meta_strategy 消融或权重分散性的图；毫秒级原子-时间曲线也不可类比论文 Figure 5 的分钟级真实流水线",
+      "how": "统一放入 supplementary.* 命名空间，标注为论文外补充分析，不与 Figure 3/4/5/6 的复现混列。"
+    },
+    {
+      "what": "PRODIGY 来源分支的验证集比较",
+      "why": "按 Table 1，PRODIGY 来源只有 2 个训练样本、0 个验证样本；验证集里没有 PRODIGY 来源复合物，按数据库分组的 PRODIGY 一致性比较在验证集上结构性缺失",
+      "how": "删除 metrics.prodigy_rmse_own_dataset 作为验证指标；若报告 PRODIGY 来源指标，仅限训练集 n=2 并显式标注不可用于验证，不用作 Figure 4 证据。"
+    },
+    {
+      "what": "元模型非负 + 权重归一约束",
+      "why": "论文只写 weighted combination linear regression，未规定非负或权重和为 1；这是计划自加的可解释性约束",
+      "how": "默认可用无约束或岭正则加权线性回归；若保留单纯形约束，必须标注为附加约束，并把“至少 6 个权重 > 0.01”的验收放宽为“至少 2–3 个显著权重”或先做可行性检查。"
+    }
+  ],
+  "required_outputs": [
+    "metrics.sl_rmse",
+    "metrics.sl_pearson_r",
+    "metrics.extra_trees_rmse",
+    "metrics.extra_trees_pearson_r",
+    "metrics.rosetta_pearson_r",
+    "metrics.prodigy_rmse_all",
+    "metrics.prodigy_pearson_r_all",
+    "metrics.n_train",
+    "metrics.n_valid",
+    "metrics.n_features",
+    "metrics.runtime_seconds",
+    "ablation.learner_rmse",
+    "supplementary.ablation.meta_strategy",
+    "supplementary.ablation.meta_weights",
+    "supplementary.curves.learning_curve_sl",
+    "supplementary.curves.learning_curve_extra_trees",
+    "supplementary.sweep.atoms_time",
+    "sweep.feature_importance",
+    "sweep.dataset_rmse_sl",
+    "sweep.dataset_rmse_extra_trees",
+    "sweep.dataset_rmse_prodigy"
+  ],
+  "issues": [
+    {
+      "claim": "faithful_parts 中称 10 个学习器“与论文一致”，包括 gradient boosting 替代 XGBoost、线性 ε-SVR 替代 SVR",
+      "problem": "XGBoost 被普通一阶/平方损失梯度提升替代，SVR 被线性 ε-SVR 替代（论文的 SVR 通常指 RBF 核）。树模型二阶近似与非线性核行为都不同，列入 faithful_parts 并称“与论文一致”是过度声明。",
+      "severity": "medium",
+      "fix": "改写为“8 个同名实现 + 2 个同族代理（GB 代 XGBoost、线性 SVR 代核 SVR）”，删除“与论文一致”。"
+    },
+    {
+      "claim": "faithful_parts 中称 52 个 Rosetta 风格描述符使置换重要性在定性上复现 Figure 6",
+      "problem": "合成数据里哪些特征与 ΔG0 相关、以及 y 由 u1..u4 生成，完全由生成器公式预先决定；cms_contact/ifa_dG/ifa_* 直接内联 u1..u3，其余 40 列近噪声。因此“重要性排序复现 Figure 6”是自证/循环：排序是构造保证的，不是 SL 机制从真实 Rosetta 描述符中涌现的结论。",
+      "severity": "high",
+      "fix": "从 faithful_parts 移出，进 simplified_parts 并写明：Figure 6 只能演示重要性计算流程，排序由合成生成器预设，不构成对论文的复现。"
+    },
+    {
+      "claim": "faithful_parts 中称 Rosetta 打分与 ΔG0 无相关复现 Figure 3；PRODIGY 跨数据集退化复现 Figure 4",
+      "problem": "Rosetta 基线被定义为与 ΔG0 完全无关的高斯噪声，PRODIGY 型基线被人为加数据集 offset；退化与无相关均由定义保证。用“构造上必然成立”的基线去复现论文结论，是把自证当成证据。",
+      "severity": "high",
+      "fix": "从 faithful_parts 降级；在 simplified_parts 明说基线结论由生成器预设，仅演示对比图表与指标计算，不作为复现 Figure 3/4 的证据。"
+    },
+    {
+      "claim": "core_idea_to_implement 中写“同时复现按数据库分组的性能一致性与特征重要性排序”",
+      "problem": "SL 堆叠机制本身抓对了（K-fold OOF + 加权元模型 + 独立验证），但“复现分组一致性与重要性排序”不是 SL 机制能实现的；这两者由数据生成器保证，列为核心目标会让读者误以为机制产出就是论文结论。",
+      "severity": "high",
+      "fix": "core idea 只保留 SL 堆叠、OOF 元特征、权重元模型、独立评估；把“一致性/重要性”改为“演示这些分析流程并能出图，结论由合成设定决定、非复现”。"
+    },
+    {
+      "claim": "faithful_parts 中称元模型非负 + 权重归一对应 Figure 1C 的 optimal weighted average",
+      "problem": "论文只写 weighted combination linear regression，未规定非负或权重和为 1；这是计划自加的约束，称“对应 Figure 1C”是轻微过度解读。此外 acceptance 要求“≥6 个权重 > 0.01”，在 6 个潜变量驱动的合成数据上未必成立。",
+      "severity": "low",
+      "fix": "说明非负/归一为可解释性自加约束、论文未明确；放宽该 acceptance 为“至少 2–3 个显著权重”或先验证可行性。"
+    },
+    {
+      "claim": "required_outputs 包含 metrics.prodigy_rmse_own_dataset",
+      "problem": "按 Table 1，PRODIGY 来源只有 2 个训练样本、0 个验证样本；验证集里根本没有 PRODIGY 来源复合物。“自身数据集 RMSE”在外部验证集上无法计算，指标要么为空、要么退化为 2 个训练点，不是 external validation，会让 demo 不成立或误导。",
+      "severity": "high",
+      "fix": "删除该指标，或改为“仅训练集、样本量 2”并显式标注不可用于验证；同时不再把它当作复现 Figure 4 的证据。"
+    },
+    {
+      "claim": "required_outputs 把 learning_curve_sl、ablation.meta_strategy、ablation.meta_weights 与论文复现混列",
+      "problem": "论文没有学习曲线、meta_strategy 消融或权重分散性的图；这些是额外分析，与“复现论文”并列容易让读者以为论文有这些结果。",
+      "severity": "low",
+      "fix": "在计划中标注为“论文外的补充分析，非复现内容”，并放入 supplementary.* 命名空间，不与 Figure 3/4/5/6 的复现混列。"
+    },
+    {
+      "claim": "acceptance_checks 中 abs(rosetta_pearson_r)<0.35、max(dataset_rmse_sl)<=max(dataset_rmse_prodigy)、feature_importance 前 5 来自 {cms_contact,…ifa_*}",
+      "problem": "这三条均由生成器定义直接保证（Rosetta=纯噪声、PRODIGY+offset、8 个特征内联 u），属于自证式验收，通过只说明“数据按预设生成、代码能跑”，不能说明复现了论文结论，会误导读者高估复现程度。",
+      "severity": "medium",
+      "fix": "改述为“可生成对应图表/指标”，不作为复现证据；增加“SL 与最佳单模型（ET）表现接近”“打乱标签后性能崩塌”“OOF 优于泄漏式堆叠”等更有区分度的检查。"
+    },
+    {
+      "claim": "runtime_budget_s=60 下纯 numpy 实现 10 折 OOF + 全量重训 + 置换重要性 + 学习曲线 + 原子扫描 + 5 张图",
+      "problem": "工作量大，随机森林/ET/bagging 各 20 棵 × 10 折 × 10 学习器，加置换重要性与多组画图，60 s CPU 很可能超时；且 acceptance 同时要求 SL 优于或等于 simple_average 与 stack_no_oof，在合成近线性数据上不保证成立。",
+      "severity": "medium",
+      "fix": "给出时间预算表，降折数/树数或预计算缓存；把堆叠对比 acceptance 放宽为“weighted_sl 不显著差于基线”，并实测后再定阈值。"
+    },
+    {
+      "claim": "漏报简化：Figure 3/4/6 的定性结论由生成器公式与噪声直接保证",
+      "problem": "这些复现是构造保证的而非机制涌现，原计划未声明。",
+      "severity": "high",
+      "fix": "把“Figure 3/4/6 只演示流程、结论由生成器预设”如实写进 simplified_parts。"
+    },
+    {
+      "claim": "漏报简化：所谓 external validation 的验证集与训练集同分布",
+      "problem": "验证集与训练集出自同一合成生成器，并非论文意义上跨数据库来源的外推验证；原计划未声明。",
+      "severity": "high",
+      "fix": "把“同生成器 holdout，不是真正 external validation”如实写进 simplified_parts。"
+    },
+    {
+      "claim": "漏报简化：52 个特征仅由 6 个潜变量驱动",
+      "problem": "真实 52 维 Rosetta 描述符之间的物理相关结构与冗余被完全替换，SL 的模型多样性、权重分配与“SL≈最佳单模型”行为不能代表真实 52 维特征场景；原计划未声明。",
+      "severity": "high",
+      "fix": "把这条简化如实写进 simplified_parts。"
+    },
+    {
+      "claim": "漏报简化：学习曲线、meta_strategy 消融、毫秒级原子-时间曲线为论文外补充分析",
+      "problem": "论文没有对应图或不可类比（Figure 5 为分钟级真实流水线），属补充演示而非复现；原计划未声明。",
+      "severity": "high",
+      "fix": "把这条简化如实写进 simplified_parts，并放入 supplementary.*。"
+    },
+    {
+      "claim": "漏报简化：PRODIGY 分支只有 2 训练/0 验证样本",
+      "problem": "使“按数据库分组”中的 PRODIGY 一致性比较在验证集上结构性缺失；原计划未声明这一划分缺陷。",
+      "severity": "high",
+      "fix": "把这条简化如实写进 simplified_parts；删除 own-dataset 验证 RMSE 指标。"
+    },
+    {
+      "claim": "漏报简化：元模型非负 + 权重归一为计划自加约束",
+      "problem": "论文仅写 weighted linear regression，未规定非负或归一；原计划未声明为简化。",
+      "severity": "high",
+      "fix": "把这条简化如实写进 simplified_parts，并标注为可解释性附加约束。"
+    }
+  ],
+  "missing_simplifications": [
+    "Figure 3/4/6 的定性结论由生成器公式预设，非 SL 机制涌现；只能演示流程，不构成复现证据。",
+    "所谓 external validation 的 105 个验证样本与训练集同分布、同生成器，不是跨数据库外推验证。",
+    "52 个特征仅由 6 个潜变量驱动，真实 Rosetta 描述符的相关/冗余结构被替换，模型多样性与权重行为不可外推。",
+    "学习曲线、meta_strategy 消融、毫秒级原子-时间曲线为论文外补充分析，不构成 Figure 5 或论文结果复现。",
+    "PRODIGY 来源仅 2 训练/0 验证，验证集上按数据库分组的 PRODIGY 一致性比较结构性缺失；不计算 own-dataset 验证 RMSE。",
+    "元模型非负 + 权重归一为计划自加约束，论文只写 weighted linear regression。",
+    "PRODIGY/Rosetta 基线为合成代理，其退化/无相关由 offset/噪声定义保证。",
+    "SVR 为线性 ε-SVR 代 RBF 核，XGBoost 为普通梯度提升代理。",
+    "合成数据无真实 3D 结构，无 Rosetta 前/后处理与界面去冗余。"
+  ],
+  "advice": "修正后的计划要把“论文机制实现”和“合成数据流程演示”彻底分开：core 只保留 SL 堆叠、OOF 元特征、加权线性元模型、全量重训与 holdout 评估；Figure 3/4/6 和 external validation 一律改称 workflow demo。输出中用 supplementary.* 隔离学习曲线、meta_strategy 消融和毫秒级原子计时；删除 metrics.prodigy_rmse_own_dataset 或仅保留训练集 n=2 的标注。60 s 预算下先降为 5 折或减少树数/重复次数，实测后再定验收；元模型默认用无约束/岭正则加权线性回归，若保留非负+归一必须标注为附加约束。验收改为可区分检查：SL 与最佳单模型接近、打乱标签后性能崩塌、OOF 优于泄漏式堆叠、数据集分组指标可生成但不作为复现证据。依赖保持 numpy + matplotlib。",
+  "demo_files": [],
+  "dependencies": [],
+  "selfcheck": {
+    "verdict": "revise",
+    "issues": [
+      {
+        "claim": "计划 JSON 自身内嵌了 issues / missing_simplifications / advice 三个字段（内容为一份陈旧评审）",
+        "problem": "这三个字段与本版 faithful_parts / simplified_parts 自相矛盾：faithful_parts 已明确写“不称与论文一致”，required_outputs 里已无 product 的 prodigy_rmse_own_dataset，simplified_parts 也已逐条申报 external validation 同分布、52 特征由 6 潜变量驱动等。把评审意见写进被评审对象里，会让后续实现者按已作废的指控去改代码。",
+        "severity": "medium",
+        "fix": "从计划中删除这三个字段（评审结果不应与计划同体），只保留 framework / core_idea / faithful / simplified / required_outputs。"
+      },
+      {
+        "claim": "required_outputs 只包含聚合指标（sl_rmse、sl_pearson_r、feature_importance、dataset_rmse_*）",
+        "problem": "论文 Figure 3 是逐样本预测-实验散点、Figure 4 是逐数据集散点/柱状、Figure 5 是时间-原子数、Figure 6 是前 20 特征贡献。只输出标量指标，连“演示出图”都做不到，更谈不上“定性复现”；计划里“生成分析图/指标”的声明与 outputs 清单不匹配。",
+        "severity": "medium",
+        "fix": "增加 predictions.y_true / predictions.sl / predictions.et / predictions.prodigy / predictions.rosetta（验证集逐样本数组）与 figures.fig3_scatter / fig4_by_dataset / fig5_atoms_time / fig6_importance 的路径输出，并在每个图上打 synthetic / workflow-demo 水印。"
+      },
+      {
+        "claim": "core_idea_to_implement 承诺与“单模型、简单平均、无 OOF 堆叠”对比",
+        "problem": "required_outputs 里只有 ablation.learner_rmse 和 supplementary.ablation.meta_strategy，没有定义 simple_average 与 stack_no_oof 的具体输出键，“核心对比”可能落空。而“OOF 堆叠 vs 无 OOF 堆叠”恰恰是这个合成 demo 唯一能真正检验 SL 机制（而非数据生成器）的信号，不能缺。",
+        "severity": "medium",
+        "fix": "补 metrics.simple_average_rmse / pearson_r、metrics.stack_no_oof_rmse / pearson_r，并预先声明：若加权 SL 在合成数据上并不优于简单平均或线性回归，将如实报告，不回头调生成器。"
+      },
+      {
+        "claim": "faithful_parts 第一条：“8 个同名实现”",
+        "problem": "这 8 个全是手写 numpy 精简版，与论文 sklearn 实现的默认结构（bagging 的基学习器、RF 的 bootstrap 与特征抽样、AdaBoost.R2 的权重更新与重采样）不等价。“SL 与最佳单模型接近 / ET 并列最高”这类相对排序有相当部分取决于手写实现质量，不能作为论文结论的证据，而 faithful_parts 把它放在了忠实项里。",
+        "severity": "medium",
+        "fix": "改为“8 个同名、简化参数的手写实现”，并把“单模型相对排序受实现质量影响，不作为 SL vs ET 结论证据”补进 simplified_parts。"
+      },
+      {
+        "claim": "simplified_parts 称保留 Table 1 计数并做按数据库分组分析（sweep.dataset_rmse_*）",
+        "problem": "验证集中 SKEMPI2 仅 7 个、Benchmark 仅 8 个、PRODIGY 为 0。n=7/8 上算出的组间 RMSE 波动极大，跨库差异不可解释；读者看到 Figure 4 式的分组柱状图会误以为在做跨数据集一致性比较。",
+        "severity": "medium",
+        "fix": "每个分组指标同时输出样本量（metrics.dataset_n.*），并对 n<10 的组明确标注“不作结论 / 仅示意”；或改为画逐点预测而不画组 RMSE。"
+      },
+      {
+        "claim": "simplified_parts 中关于 Figure 3/4/6 的说明（“结论由生成器预设，不构成复现”）",
+        "problem": "方向正确但强度不够：生成器是反向设计的——Rosetta 基线被定义成与 ΔG0 无关的纯噪声、PRODIGY 被加数据集 offset、cms/ifa 直接内联 u1..u3。这不是“结论恰好被预设”，而是主动构造论文结论的形状。同时若仍保留“rosetta_pearson_r < 0.35”“importance 前 5 来自 cms/ifa”之类验收门槛，那是构造必然成立，属于自证式验收。",
+        "severity": "medium",
+        "fix": "把这些基线统称“与论文无关的合成参照系，仅用于演示指标/绘图代码路径”；删除基于它们的通过/失败门槛；验收改为可区分检查：打乱标签后所有模型 RMSE 退化到 y 的标准差、OOF 堆叠优于无 OOF 堆叠、单折内无样本泄漏。"
+      },
+      {
+        "claim": "元模型“至少 6 个权重 > 0.01”的验收（simplified_parts 末条提到放宽）",
+        "problem": "在 6 个潜变量驱动的合成数据上，这条既可能天然不成立（有效学习器少），也可能被非负+归一约束强行造出来，是脆弱且无信息量的门槛。",
+        "severity": "low",
+        "fix": "只报告权重向量与有效权重个数，不设通过/失败阈值；非负+归一默认关闭、作为可选开关，并在输出里标注为自加的可解释性约束。"
+      },
+      {
+        "claim": "60 s CPU 预算内完成 10 折 OOF × 10 学习器 + 全量重训 + 3 次重复置换重要性 + 学习曲线 + 原子扫描 + 4–5 张图",
+        "problem": "RF/ET/bagging 各 20 棵树 × 10 折就约 600 次树拟合，再加元模型与全量重训；置换重要性还要 52 特征 × 3 重复 × 全验证集前向。纯 numpy 下很可能超时，届时只能砍功能，导致 outputs 里承诺的项缺失。",
+        "severity": "medium",
+        "fix": "先给出耗时预算表（单学习器单折实测 × 折数），据此把折数降到 5 或树数降到 10、置换重复降到 1 次并缓存预测；提供 --fast 开关并在 README 写明默认档位的实际耗时。"
+      },
+      {
+        "claim": "论文交付物 PBEE（--ipdb / --partner1 / --partner2 → ΔG0 与 KD）",
+        "problem": "计划里既无 PDB 解析、无链选择，也无 KD 换算和任何 CLI，交付的是“SL 机制 demo”。这不属于不诚实，但未在 simplified_parts 里申报，读者容易以为能得到论文那种“输入 PDB 输出绝对结合自由能”的工具。",
+        "severity": "low",
+        "fix": "在 simplified_parts 补一条：不实现 PBEE 应用层（无 PDB 输入、无链选择、无 CLI）；至少补 KD = exp(ΔG0/RT)（R=1.987e-3 kcal·mol⁻¹·K⁻¹, T=298.15 K）的纯数值换算，使“ΔG0→KD”这条输出格式与论文对齐。"
+      },
+      {
+        "claim": "合成标签噪声 N(0,1.5) 与论文报告的 RMSE 1.98 / R=0.70 数值接近",
+        "problem": "接近是噪声方差选出来的。若输出里把 sl_rmse≈1.9 与论文 1.98 并排，会造成“精度已被复现”的错觉。",
+        "severity": "low",
+        "fix": "输出中显式标注“合成数据 RMSE 与论文数值不可比”，不要与论文的 1.98 / 0.70 并列展示。"
+      },
+      {
+        "claim": "漏报的简化",
+        "problem": "10 个基学习器均为手写 numpy 精简实现，非论文所用 sklearn 同参数配置；单模型的相对排序部分取决于实现质量，不作为 SL vs ET 结论的证据。",
+        "severity": "high",
+        "fix": "把这条简化如实写进 simplified_parts"
+      },
+      {
+        "claim": "漏报的简化",
+        "problem": "未实现 PBEE 应用层：无 PDB 结构输入、无 --partner1/--partner2 链选择、无 KD 输出、无命令行入口。",
+        "severity": "high",
+        "fix": "把这条简化如实写进 simplified_parts"
+      },
+      {
+        "claim": "漏报的简化",
+        "problem": "按数据库分组的验证指标样本量极小（SKEMPI2 n=7、Benchmark n=8、PRODIGY n=0），组间 RMSE 差异不可解释，无法支撑“跨数据集一致性”的定性判断。",
+        "severity": "high",
+        "fix": "把这条简化如实写进 simplified_parts"
+      },
+      {
+        "claim": "漏报的简化",
+        "problem": "置换重要性只用 3 次重复、52 个特征，排序本身的抽样噪声未评估；除 SHAP→置换重要性的替换外，“排序稳定性”也未申报。",
+        "severity": "high",
+        "fix": "把这条简化如实写进 simplified_parts"
+      },
+      {
+        "claim": "漏报的简化",
+        "problem": "合成数据的 RMSE/R 与论文 1.98 kcal/mol、R=0.70 在数值上接近是噪声参数设定的产物，不构成精度复现。",
+        "severity": "high",
+        "fix": "把这条简化如实写进 simplified_parts"
+      },
+      {
+        "claim": "漏报的简化",
+        "problem": "生成器为贴合论文图形状而反向设计（Rosetta=纯噪声、PRODIGY=潜变量线性式+数据集 offset、cms/ifa 内联 u1..u3），这一点比“结论由生成器预设”更强，应如实写成“基线本身是构造出来的参照系”。",
+        "severity": "high",
+        "fix": "把这条简化如实写进 simplified_parts"
+      }
+    ],
+    "mode": "llm",
+    "advice": "这份计划的骨架是诚实的：core_idea 抓的是论文真正的 SL 机制（K-fold OOF 元特征 + 加权线性元模型 + 全量重训 + 独立留出评估），不是泛泛替代品，不需要降级 core。要改的是三处：(1) 先把计划里内嵌的那份陈旧 issues/missing_simplifications/advice 删掉，它和当前版本自相矛盾；(2) 补全 outputs——没有逐样本预测数组和图片产物，Figure 3/4/5/6 连“流程演示”都出不来，同时把 simple_average / stack_no_oof 两个对比显式落到输出键上，那是唯一能检验 SL 机制而非生成器的信号；(3) 把自证式验收（Rosetta 相关性阈值、importance 前 5 来自 cms/ifa、权重个数门槛）换成可区分检查（打乱标签后崩塌、OOF 优于无 OOF、分组样本量随指标一并报告）。另外先做一次 60 s 时间预算实测再定折数/树数，默认元模型用无约束或岭正则，非负+归一作可选开关并标注为自加约束。",
+    "checked": [
+      "声明简化项",
+      "声明忠实项",
+      "核心机制非空",
+      "可绘图数据键",
+      "框架与依赖一致"
+    ],
+    "revised_from": "revise",
+    "revised": true
+  },
+  "resolved_dependencies": {
+    "level": "light",
+    "third_party": [
+      "numpy"
+    ],
+    "available": [
+      "numpy"
+    ],
+    "missing": [],
+    "pip_missing": [],
+    "manual_missing": [],
+    "local_modules": [],
+    "declared_clean": [],
+    "install_hint": "",
+    "manual_hint": "",
+    "degrade_to_stdlib": false
+  }
+}

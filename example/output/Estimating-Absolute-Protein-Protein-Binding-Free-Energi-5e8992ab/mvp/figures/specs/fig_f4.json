@@ -1,0 +1,18 @@
+{
+  "id": "fig_f4",
+  "paper_ref": "Figure 4",
+  "caption": "Comparison of PBEE prediction accuracy by ML method to Rosetta and PRODIGY, for the three protein-protein complex data sets.",
+  "kind": "line",
+  "reproducibility": "not_reproducible",
+  "data_keys": [],
+  "axes": {},
+  "series": [],
+  "chart": null,
+  "layout": "1x1",
+  "style_notes": "",
+  "diagram": null,
+  "mermaid": null,
+  "demo_change_needed": "需要真实实验数据；可让 demo 写出对应曲线/扫参结果（见 plan.required_outputs）后再绘制",
+  "source_note": "",
+  "original_image": "./figures/p04_x288.png"
+}

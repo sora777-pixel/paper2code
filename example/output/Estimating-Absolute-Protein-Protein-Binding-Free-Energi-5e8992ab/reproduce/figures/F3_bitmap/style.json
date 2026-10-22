@@ -1,0 +1,562 @@
+{
+  "figures": [
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0366,
+        "edge_color": "#020304",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#45718c",
+          "#325063",
+          "#08306b"
+        ],
+        "n_series": 4
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.4059,
+        "x_span_px": [
+          158,
+          483
+        ],
+        "slope": 0.499,
+        "intercept": -4.9501,
+        "x_range": [
+          -16.442,
+          -0.817
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -11.012
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -10.913
+        }
+      ]
+    },
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0366,
+        "edge_color": "#020405",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#6b98b1",
+          "#46748e",
+          "#325264",
+          "#08306b"
+        ],
+        "n_series": 5
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.3345,
+        "x_span_px": [
+          158,
+          483
+        ],
+        "slope": 0.3486,
+        "intercept": -6.8189,
+        "x_range": [
+          -16.442,
+          -0.817
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -10.929
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -11.01
+        }
+      ]
+    },
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0366,
+        "edge_color": "#020406",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#6994aa",
+          "#203642",
+          "#08306b"
+        ],
+        "n_series": 4
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.3394,
+        "x_span_px": [
+          688,
+          1013
+        ],
+        "slope": 0.361,
+        "intercept": -6.6968,
+        "x_range": [
+          -16.429,
+          -0.952
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -10.918
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -10.952
+        }
+      ]
+    },
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0367,
+        "edge_color": "#020404",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#6f98bc",
+          "#5083a1",
+          "#08306b"
+        ],
+        "n_series": 4
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.3798,
+        "x_span_px": [
+          1219,
+          1544
+        ],
+        "slope": 0.4436,
+        "intercept": -5.6962,
+        "x_range": [
+          -16.49,
+          -0.865
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -10.909
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -11.01
+        }
+      ]
+    },
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0366,
+        "edge_color": "#020405",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#507e9a",
+          "#08306b",
+          "#101b22"
+        ],
+        "n_series": 4
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.2913,
+        "x_span_px": [
+          1750,
+          2075
+        ],
+        "slope": 0.4424,
+        "intercept": -5.8877,
+        "x_range": [
+          -16.442,
+          -0.817
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -10.956
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -10.913
+        }
+      ]
+    },
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0366,
+        "edge_color": "#020405",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#477690",
+          "#1f3340",
+          "#08306b"
+        ],
+        "n_series": 4
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.1217,
+        "x_span_px": [
+          158,
+          483
+        ],
+        "slope": 0.0389,
+        "intercept": -9.7142,
+        "x_range": [
+          -16.442,
+          -0.817
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -10.923
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -10.913
+        }
+      ]
+    },
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0366,
+        "edge_color": "#020405",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#5991a6",
+          "#426d86",
+          "#32525e",
+          "#08306b"
+        ],
+        "n_series": 5
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.2372,
+        "x_span_px": [
+          688,
+          1014
+        ],
+        "slope": 0.4563,
+        "intercept": -5.6981,
+        "x_range": [
+          -16.429,
+          -0.905
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -11.019
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -10.952
+        }
+      ]
+    },
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0367,
+        "edge_color": "#020203",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#5b96b5",
+          "#426c85",
+          "#243c49",
+          "#08306b"
+        ],
+        "n_series": 5
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.2709,
+        "x_span_px": [
+          1219,
+          1544
+        ],
+        "slope": 0.3146,
+        "intercept": -6.8065,
+        "x_range": [
+          -16.49,
+          -0.865
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -11.011
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -10.962
+        }
+      ]
+    },
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0366,
+        "edge_color": "#020405",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#5183a2",
+          "#08306b"
+        ],
+        "n_series": 3
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.2985,
+        "x_span_px": [
+          1750,
+          2075
+        ],
+        "slope": 0.3022,
+        "intercept": -7.241,
+        "x_range": [
+          -16.435,
+          -0.885
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -10.99
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -10.933
+        }
+      ]
+    },
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0366,
+        "edge_color": "#020304",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#35586b",
+          "#08306b"
+        ],
+        "n_series": 3
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.1125,
+        "x_span_px": [
+          158,
+          483
+        ],
+        "slope": 0.1025,
+        "intercept": -9.6962,
+        "x_range": [
+          -16.442,
+          -0.817
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -10.921
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -10.913
+        }
+      ]
+    },
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0366,
+        "edge_color": "#020405",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#497894",
+          "#08306b"
+        ],
+        "n_series": 3
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.0457,
+        "x_span_px": [
+          688,
+          1014
+        ],
+        "slope": 0.6357,
+        "intercept": -56.3327,
+        "x_range": [
+          -16.429,
+          -0.905
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -9.868
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -10.952
+        }
+      ]
+    },
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0367,
+        "edge_color": "#020304",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#1d303a",
+          "#08306b"
+        ],
+        "n_series": 3
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.3948,
+        "x_span_px": [
+          1219,
+          1544
+        ],
+        "slope": 0.4357,
+        "intercept": -5.5279,
+        "x_range": [
+          -16.49,
+          -0.865
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -10.957
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -10.962
+        }
+      ]
+    },
+    {
+      "marker": {
+        "diameter_px": 13.0,
+        "diameter_ratio": 0.0366,
+        "edge_color": "#020406",
+        "edge_present": true,
+        "fills": [
+          "#6aaed6",
+          "#6a9cb4",
+          "#3e677e",
+          "#08306b"
+        ],
+        "n_series": 4
+      },
+      "trend_line": {
+        "kind": "trend",
+        "color": "#ff0000",
+        "width_px": 5.0,
+        "slope_px": -0.3593,
+        "x_span_px": [
+          1750,
+          2075
+        ],
+        "slope": 0.3439,
+        "intercept": -6.6627,
+        "x_range": [
+          -16.435,
+          -0.885
+        ]
+      },
+      "reference_lines": [
+        {
+          "orientation": "h",
+          "style": "dashed",
+          "value": -10.972
+        },
+        {
+          "orientation": "v",
+          "style": "dashed",
+          "value": -10.981
+        }
+      ]
+    }
+  ]
+}

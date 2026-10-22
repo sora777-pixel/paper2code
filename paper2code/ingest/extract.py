@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional, Tuple
 
-from ..models import Algorithm, CodeRef, Figure, Formula, Section, Table
+from ..models import Algorithm, CodeRef, Figure, Formula, Table
 
 # --------------------------------------------------------------------------- #
 # 表格
@@ -17,9 +17,77 @@ from ..models import Algorithm, CodeRef, Figure, Formula, Section, Table
 _SEP_RE = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
 _PIPE_RE = re.compile(r"^\s*\|.*\|\s*$")
 _CAPTION_RE = re.compile(
-    r"^\s*\*{0,2}\s*(Table|TABLE|表)\s*((?:S-?)?(?:[0-9]+|[IVXLCDM]+))\s*[.:：、]?\s*(.*)$",
-    re.IGNORECASE,
+    r"^\s*\*{0,2}\s*(Table|表)\s*([0-9]+[a-zA-Z]?)\s*[.:：、]?\s*(.*)$", re.IGNORECASE
 )
+
+
+# --------------------------------------------------------------------------- #
+# 公式（roadmap M3-③ 的前置：``Paper.formulas`` 此前一直没有抽取器）
+# --------------------------------------------------------------------------- #
+#: ``<expr> (12)`` —— 公式与编号同行的期刊排版
+_EQ_TAG_TAIL_RE = re.compile(r"^(?P<body>.+?)\s*\(\s*(?P<num>\d{1,3}[a-z]?)\s*\)\s*$")
+#: 只有编号，公式在上一行
+_EQ_TAG_ONLY_RE = re.compile(r"^\(\s*(\d{1,3}[a-z]?)\s*\)$")
+_MATH_CHARS = ("=", "\u2264", "\u2265", "\u2211", "\u222b", "\u221a", "\\frac", "\\sum",
+               "\\int", "<=", ">=", "^", "_", "/", "\\")
+
+
+def _looks_math(s: str) -> bool:
+    """像公式而不像散文：含数学符号，且不是「以句号收尾的长句」。"""
+    t = (s or "").strip()
+    if not t or len(t) > 200:
+        return False
+    if t.endswith((".", "\u3002")) and len(t) > 60:
+        return False
+    return any(c in t for c in _MATH_CHARS)
+
+
+def _nearest_prose(lines: List[str], idx: int, back: int = 8) -> str:
+    """往上找最近一句「文字解释」，作为公式的语义锚点。"""
+    for j in range(idx - 1, max(-1, idx - 1 - back), -1):
+        t = (lines[j] or "").strip()
+        if len(t) >= 40 and re.search(r"[A-Za-z\u4e00-\u9fff]", t):
+            return t
+    return ""
+
+
+def extract_formulas(lines: List[str]) -> List[Formula]:
+    """抽编号公式：``<expr> (12)`` 或 ``<expr>`` + 下一行 ``(12)``。
+
+    只认带**编号**的展示公式——这是「论文中编号公式」的字面含义，也避免把正文里
+    随手出现的 ``=`` 误当公式。每条公式尽量带上最近的**文字解释**，供 M3-③
+    生成数值断言时锚定语义（离线没有 LLM，只能靠这段文字）。
+    """
+    out: List[Formula] = []
+    seen: set[str] = set()
+    for i, raw in enumerate(lines):
+        s = (raw or "").strip()
+        if not s:
+            continue
+        only = _EQ_TAG_ONLY_RE.match(s)
+        tail = _EQ_TAG_TAIL_RE.match(s)
+        expr, num, anchor = "", "", i
+        if only and i > 0 and _looks_math(lines[i - 1]):
+            expr, num, anchor = (lines[i - 1] or "").strip(), only.group(1), i - 1
+        elif tail and _looks_math(tail.group("body")):
+            expr, num, anchor = tail.group("body").strip(), tail.group("num"), i
+        else:
+            continue
+        if num in seen:
+            continue
+        seen.add(num)
+        out.append(Formula(id="E%s" % num, number=num, expression=expr[:300],
+                           explanation=_nearest_prose(lines, anchor)[:300]))
+    return out
+
+#: 分页标记——PDF 链路为保留页边界而插入。**任何情况下都不能当成章节标题**，
+#: 否则每页都会被记成一个语义章节（历史上正是这么坏的）。兼容 ``[[PAGE:2]]``
+#: 与 ``[Page 2]`` / ``# [Page 2]`` 等历史写法。
+PAGE_MARK_RE = re.compile(r"^#?\s*\[{1,2}\s*page\s*:?\s*\d+\s*\]{1,2}$", re.IGNORECASE)
+
+
+def is_page_marker(s: str) -> bool:
+    return bool(PAGE_MARK_RE.match((s or "").strip()))
 
 
 def _split_pipe(line: str) -> List[str]:
@@ -77,7 +145,7 @@ def _find_caption(lines: List[str], start: int, window: int = 3) -> str:
 # 图
 # --------------------------------------------------------------------------- #
 _FIG_CAP_RE = re.compile(
-    r"^\s*\*{0,2}\s*(Figure|Fig\.?|FIG\.?|图)\s*(S?\d+[a-zA-Z]?)\s*[.:：、]?\s*(.*)$",
+    r"^\s*\*{0,2}\s*(Figure|Fig\.?|图)\s*([0-9]+[a-zA-Z]?)\s*[.:：、]?\s*(.*)$",
     re.IGNORECASE,
 )
 _MD_IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
@@ -237,7 +305,10 @@ def _first_sentence(body: List[str]) -> str:
 # 代码 / 数据资源链接
 # --------------------------------------------------------------------------- #
 _URL_RE = re.compile(r"https?://[^\s\)\]\}>\"',;]+")
-_GITHUB_RE = re.compile(r"https?://(?:www\.)?github\.com/[\w.\-]+/[\w.\-]+", re.IGNORECASE)
+#: 捕获 owner / repo 两个分组：候选排序要拿 repo 名与论文标题/上下文比对。
+_GITHUB_RE = re.compile(r"https?://(?:www\.)?github\.com/([\w.\-]+)/([\w.\-]+)", re.IGNORECASE)
+#: 跨行断开的 URL 续行：整行只能是 URL 字符（没有空格/中文）
+_URL_CONT_RE = re.compile(r"^[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%\-]+$")
 _DATASET_HINTS = (
     "dataset", "data set", "data available", "data is available", "zenodo",
     "figshare", "huggingface", "kaggle", "dryad", "openml", "数据",
@@ -246,28 +317,157 @@ _CODE_HINTS = (
     "code", "implementation", "source code", "released", "available at",
     "github", "repository", "repo", "开源", "代码",
 )
+#: 指向「本论文自己的代码」的正向线索
+_OWN_HINTS = (
+    "code availability", "data availability", "source code", "code is available",
+    "code available", "publicly available", "our code", "we release", "we provide",
+    "implementation is available", "implementation available", "code for ",
+    "开源代码", "代码可用", "代码已开源",
+)
+#: 指向「被引用的第三方仓库」的负向线索
+_THIRD_PARTY_HINTS = (
+    "maintained by", "accessed 20", "accessed:", "accessed on", "third-party",
+    "third party", "external repository", "we use the", "built upon",
+)
+#: 文献清单 / awesome-list 不是可复现代码
+_LIST_REPO_HINTS = ("awesome", "survey", "literature", "paper-list", "paperlist", "reading-list")
+_CITATION_RE = re.compile(r"\[\d{1,3}\]")
+_FOOTNOTE_URL_RE = re.compile(r"^\s*\d+\s*https?://")
 
 
-def extract_code_refs(lines: List[str]) -> Tuple[List[CodeRef], List[CodeRef]]:
+def _norm_alnum(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+def _clean_scheme(url: str) -> str:
+    """修掉 PDF 常见的 ``https://https://...`` 重复协议与 ``www.`` 前缀。"""
+    raw = (url or "").strip().rstrip(".,;)")
+    raw = re.sub(r"^(https?://)https?://", r"\1", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"^(https?://)www\.", r"\1", raw, flags=re.IGNORECASE)
+    return raw
+
+
+def _normalize_github_url(url: str) -> Tuple[str, str]:
+    """把 GitHub 链接归一成 ``(仓库根, 子目录)``。
+
+    ``/tree|blob/main/sub/dir`` 只保留 ``https://github.com/owner/repo``，
+    子目录另存（克隆时不能用带子目录的 URL，git 会直接 404）。
+    """
+    raw = _clean_scheme(url)
+    m = _GITHUB_RE.match(raw)
+    if not m:
+        return raw, ""
+    root = m.group(0).rstrip("/")
+    if root.lower().endswith(".git"):
+        root = root[:-4]
+    return root, raw[len(m.group(0)):].strip("/")
+
+
+def _join_wrapped_urls(lines: List[str]) -> List[str]:
+    """把被 PDF 换行截断的 URL 拼回去。
+
+    实测两例：``https://github.`` + ``com/BIMSBbioinfo/PocketVina.``，
+    ``https://github.com/msinclair-py/molecular-`` + ``simulations``。
+    续行必须整行都是 URL 字符，避免把正文里的普通单词接进来。
+    """
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        while i + 1 < len(lines) and _is_url_continuation(line, lines[i + 1]):
+            line = line.rstrip() + lines[i + 1].strip()
+            i += 1
+        out.append(line)
+        i += 1
+    return out
+
+
+def _is_url_continuation(line: str, nxt: str) -> bool:
+    nxt = (nxt or "").strip()
+    if not nxt or len(nxt) > 120 or not _URL_CONT_RE.match(nxt):
+        return False
+    m = _URL_RE.search(line or "")
+    if not m:
+        return False
+    tail = m.group(0)
+    if tail.endswith(("/", "-", "_", "=", "?", "&")):
+        return True
+    if tail.endswith("."):
+        after = tail.split("//", 1)[-1].rstrip(".")
+        return "/" not in after  # 只补「域名被断在点号处」，不接正文句号
+    return False
+
+
+def _repo_role(url: str, ctx: str, line: str, title: str = "") -> Tuple[str, float, str]:
+    """判定一个 GitHub 仓库是「本论文自有」还是「被引用的第三方」。
+
+    只靠 URL 本身无法区分：实测同一篇论文里，自有仓库与被引用的依赖仓库
+    混在一起，旧逻辑永远取第一个，于是 MECo 克隆了 Qwen2.5-Coder、
+    StructBioReasoner 克隆了 crewAI、pocketvina 克隆了别人的 Blind。
+    这里用「代码可用表述 + 仓库名匹配 - 引用标记 - awesome-list」打分。
+    """
+    key = _repo_key(url)
+    low = (ctx or "").lower()
+    # URL 本身也含仓库名：比对前先剔除，否则每个仓库都会“匹配”自己的 URL
+    prose = _norm_alnum(_URL_RE.sub(" ", low))
+    score = 0.0
+    why: List[str] = []
+
+    if any(h in low for h in _OWN_HINTS):
+        score += 3
+        why.append("+3 代码可用表述")
+    if key and len(key) >= 4 and (key in prose or key in _norm_alnum(title)):
+        score += 2
+        why.append("+2 仓库名与论文/上下文匹配")
+    if (_CITATION_RE.search(ctx or "") or _FOOTNOTE_URL_RE.match((line or "").strip())
+            or any(h in low for h in _THIRD_PARTY_HINTS)):
+        score -= 4
+        why.append("-4 引用/第三方线索")
+    if any(h in key for h in _LIST_REPO_HINTS):
+        score -= 5
+        why.append("-5 文献/列表仓库")
+
+    role = "own_code" if score >= 2 else ("third_party" if score <= -2 else "unclear")
+    confidence = min(0.99, 0.5 + abs(score) / 10.0)
+    return role, confidence, "；".join(why) or "无明确线索"
+
+
+def _repo_key(url: str) -> str:
+    m = _GITHUB_RE.match(url or "")
+    return _norm_alnum(m.group(2)) if m else ""
+
+
+def extract_code_refs(lines: List[str], title: str = "") -> Tuple[List[CodeRef], List[CodeRef]]:
     """返回 ``(code_refs, data_refs)``。
 
-    通过 URL 所在行/相邻行的关键词判断该链接是代码仓库还是数据集。
+    通过 URL 所在行/相邻行的关键词判断该链接是代码仓库还是数据集；
+    GitHub 链接还会归一化并判定归属（自有 / 第三方），供候选排序使用。
     """
     code_refs: List[CodeRef] = []
     data_refs: List[CodeRef] = []
     seen: set[str] = set()
 
-    for i, line in enumerate(lines):
-        ctx = " ".join(lines[max(0, i - 1) : i + 2]).lower()
+    logical = _join_wrapped_urls(lines)
+    for i, line in enumerate(logical):
+        ctx = " ".join(logical[max(0, i - 2) : i + 3]).lower()
         for m in _URL_RE.finditer(line):
             url = m.group(0).rstrip(".,;)")
-            if url in seen:
-                continue
-            if _GITHUB_RE.match(url):
-                seen.add(url)
+            root, subpath = _normalize_github_url(url)
+            if _GITHUB_RE.match(root):
+                if root in seen:
+                    continue
+                seen.add(root)
+                role, confidence, reason = _repo_role(root, ctx, line, title)
                 code_refs.append(
-                    CodeRef(url=url, kind="repo", evidence=line.strip()[:200])
+                    CodeRef(url=root, kind="repo", evidence=line.strip()[:200],
+                            role=role, confidence=confidence, subpath=subpath,
+                            role_reason=reason)
                 )
+                continue
+            # 只剩空域名的残片（``https://github.com/``）不是可用仓库
+            if re.fullmatch(r"https?://(?:www\.)?github\.com/?", url, re.IGNORECASE):
+                continue
+            if url in seen:
                 continue
             if any(h in ctx for h in _DATASET_HINTS) or any(
                 h in url.lower() for h in ("zenodo", "figshare", "huggingface", "kaggle", "dryad", "openml")
@@ -282,26 +482,7 @@ def extract_code_refs(lines: List[str]) -> Tuple[List[CodeRef], List[CodeRef]]:
                 code_refs.append(
                     CodeRef(url=url, kind="other", evidence=line.strip()[:200])
                 )
-    code_refs = add_named_repo_refs(lines, code_refs)
     return code_refs, data_refs
-
-
-# 论文只写 "SchNOrb repository"、正文没有 github.com 字符串时，补官方仓库。
-_NAMED_REPOS = {
-    "schnorb": "https://github.com/atomistic-machine-learning/SchNOrb",
-}
-
-
-def add_named_repo_refs(lines: List[str], code_refs: List[CodeRef]) -> List[CodeRef]:
-    blob = "\n".join(lines).lower()
-    if not any(k in blob for k in ("repository", "github", "gitlab", "source code", "开源")):
-        return code_refs
-    seen = {r.url for r in code_refs}
-    for name, url in _NAMED_REPOS.items():
-        if name in blob and url not in seen:
-            code_refs.append(CodeRef(url=url, kind="repo", evidence=f"正文提到 {name} repository"))
-            seen.add(url)
-    return code_refs
 
 
 _CODE_NOUNS = (
@@ -324,8 +505,6 @@ def find_code_statement(lines: List[str]) -> str:
     for line in lines:
         low = line.lower()
         if any(n in low for n in _CODE_NOUNS) and any(v in low for v in _RELEASE_VERBS):
-            return line.strip()[:240]
-        if re.search(r"existing\\s+\\w+\\s+repository", low) or re.search(r"\\b\\w+\\s+repository\\b", low) and "github" in low:
             return line.strip()[:240]
     return ""
 
@@ -350,9 +529,6 @@ _KIND_MAP: List[Tuple[str, str]] = [
     ("ablation", "experiment"),
     ("discussion", "discussion"),
     ("conclusion", "conclusion"),
-    ("outlook", "conclusion"),
-    ("future work", "conclusion"),
-    ("limitation", "discussion"),
     ("reference", "references"),
     ("bibliograph", "references"),
     ("appendix", "appendix"),
@@ -363,9 +539,6 @@ _KIND_MAP: List[Tuple[str, str]] = [
     ("实验", "experiment"),
     ("结果", "experiment"),
     ("结论", "conclusion"),
-    ("展望", "conclusion"),
-    ("不足", "discussion"),
-    ("局限", "discussion"),
     ("参考文献", "references"),
     ("附录", "appendix"),
 ]
@@ -377,157 +550,3 @@ def classify_heading(heading: str) -> str:
         if needle in low:
             return kind
     return "section"
-
-
-# --------------------------------------------------------------------------- #
-# 学术论文分节（I. INTRODUCTION）与表题（TABLE I / S2）
-# --------------------------------------------------------------------------- #
-_ROMAN = r"(?:I{1,3}|IV|V|VI|VII|VIII|IX|X)"
-_SEC_NAME = (
-    r"(?:ABSTRACT|INTRODUCTION|RELATED\s+WORK|BACKGROUND|THEORY|"
-    r"METHODS?|RESULTS?(?:\s+AND\s+DISCUSSION)?|DISCUSSION|"
-    r"CONCLUSIONS?(?:\s+AND\s+OUTLOOK)?|ACKNOWLEDGMENTS?|"
-    r"REFERENCES|BIBLIOGRAPHY|APPENDIX|SUPPLEMENTARY(?:\s+MATERIAL)?|"
-    r"DATA\s+AVAILABILITY(?:\s+STATEMENT)?)"
-)
-_SECTION_HEAD = re.compile(
-    rf"^(?:{_ROMAN}|[0-9]+)\.\s+{_SEC_NAME}\s*$|^\s*{_SEC_NAME}\s*$",
-    re.I,
-)
-_LONE_NUM = re.compile(rf"^(?:{_ROMAN}|[0-9]+)\.\s*$")
-
-
-def split_academic_sections(lines: List[str]) -> List[Section]:
-    """从双栏重排后的正文里切 I./II. 风格章节；少于 2 个标题则返回空。"""
-    marks: List[Tuple[int, int, str]] = []
-    i = 0
-    n = len(lines)
-    while i < n:
-        s = lines[i].strip()
-        j = i + 1
-        while j < n and not lines[j].strip():
-            j += 1
-        nxt = lines[j].strip() if j < n else ""
-        heading = None
-        end_idx = i
-        if s and len(s) <= 80 and _SECTION_HEAD.match(s):
-            heading = re.sub(r"\s+", " ", s)
-        elif s and _LONE_NUM.match(s) and nxt and len(nxt) <= 80 and _SECTION_HEAD.match(nxt):
-            heading = re.sub(r"\s+", " ", f"{s} {nxt}")
-            end_idx = j
-        if heading:
-            marks.append((i, end_idx, heading))
-            i = end_idx + 1
-            continue
-        i += 1
-    if len(marks) < 2:
-        return []
-    out: List[Section] = []
-    for k, (_start, end_idx, heading) in enumerate(marks):
-        stop = marks[k + 1][0] if k + 1 < len(marks) else n
-        body = "\n".join(lines[end_idx + 1 : stop]).strip()
-        out.append(Section(heading=heading, level=1, text=body, kind=classify_heading(heading)))
-    return out
-
-
-def extract_captioned_tables(lines: List[str]) -> List[Table]:
-    """即使没有网格线，也把 TABLE I / TABLE S2 题注收成表。"""
-    out: List[Table] = []
-    seen = set()
-    for i, line in enumerate(lines):
-        m = _CAPTION_RE.match(line.strip())
-        if not m:
-            continue
-        num = m.group(2)
-        tid = f"T{num}"
-        if tid in seen:
-            continue
-        seen.add(tid)
-        caption = (m.group(3) or "").strip()
-        extra: List[str] = []
-        for j in range(i + 1, min(len(lines), i + 4)):
-            nxt = lines[j].strip()
-            if not nxt or _CAPTION_RE.match(nxt) or _FIG_CAP_RE.match(nxt) or _SECTION_HEAD.match(nxt):
-                break
-            if len(nxt) < 180:
-                extra.append(nxt)
-            else:
-                break
-        if extra:
-            caption = (caption + " " + " ".join(extra)).strip()
-        out.append(Table(id=tid, caption=caption or line.strip(), header=[], rows=[], source="pdf-caption"))
-    return out
-
-def extract_formulas(lines: List[str]) -> List["Formula"]:
-    """抽取带编号、且正文有文字解释的公式。
-
-    版式常见：数学行在上，单独一行 ``(12)`` 作编号；解释里写 ``Eq. 12``。
-    """
-    num_only = re.compile(r"^[（(]\s*(\d{1,2})\s*[)）]\s*$")
-    mention = re.compile(
-        r"(?:Eq(?:uation)?\.?|eq\.|公式)\s*[\(（]?\s*(\d{1,2})\s*[\)）]?",
-        re.I,
-    )
-
-    # 先收集正文里被点名的编号
-    explained: dict[str, List[str]] = {}
-    for i, line in enumerate(lines):
-        for m in mention.finditer(line):
-            n = m.group(1)
-            # 取当前句及前后各一句，作为该编号的文字解释
-            ctx = []
-            for j in range(max(0, i - 1), min(len(lines), i + 3)):
-                s = lines[j].strip()
-                if s and not num_only.match(s):
-                    ctx.append(s)
-            blob = " ".join(ctx)
-            blob = re.sub(r"\s+", " ", blob).strip()
-            if blob:
-                explained.setdefault(n, []).append(blob)
-
-    formulas: List[Formula] = []
-    seen = set()
-    for i, line in enumerate(lines):
-        m = num_only.match(line.strip())
-        if not m:
-            continue
-        n = m.group(1)
-        if n in seen or n not in explained:
-            continue
-        # 向上收集公式本体（短行、像数学）
-        body: List[str] = []
-        j = i - 1
-        while j >= 0:
-            s = lines[j].strip()
-            if not s:
-                if body:
-                    break
-                j -= 1
-                continue
-            if num_only.match(s):
-                break
-            if mention.search(s) and len(s) > 80:
-                break
-            if len(s) > 140 and not re.search(r"[=∑∫√ψϕεϵ∈→←]", s):
-                break
-            body.append(s)
-            if len(body) >= 6:
-                break
-            j -= 1
-        expr = " ".join(reversed(body)).strip()
-        expr = re.sub(r"\s+", " ", expr)
-        if len(expr) < 2:
-            continue
-        seen.add(n)
-        formulas.append(
-            Formula(
-                id=f"E{n}",
-                number=n,
-                expression=expr,
-                explanation=explained[n][0][:400],
-            )
-        )
-    # 按编号排序
-    formulas.sort(key=lambda f: int(f.number) if f.number.isdigit() else 999)
-    return formulas
-

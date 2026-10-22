@@ -32,6 +32,68 @@ _CJK = re.compile(r"[\u4e00-\u9fff]")
 _EN_WORD = re.compile(r"[A-Za-z][A-Za-z\-]{1,}")
 _CJK_WORD = re.compile(r"[\u4e00-\u9fff]{2,6}")
 
+#: PDF / HTML 抽取文本的常见「隐形垃圾」。这些字符肉眼不可见或近似可见，
+#: 但会实打实地破坏下游处理：
+#:   * ``U+00A0`` NBSP → 参数表里出现会直接让 ``def f(a, b)`` 变成语法错误；
+#:   * ``U+200B/U+FEFF`` 零宽字符 → 吞掉后关键词/正则才知道自己在匹配什么；
+#:   * ``ﬁ ﬂ ﬀ`` 连字 → ``def`` ``flag`` 之类的词被拆散，匹配全失效。
+_SPACE_MAP = {
+    "\u00a0": " ",  # NBSP
+    "\u1680": " ",
+    "\u2000": " ",
+    "\u2001": " ",
+    "\u2002": " ",
+    "\u2003": " ",
+    "\u2004": " ",
+    "\u2005": " ",
+    "\u2006": " ",
+    "\u2007": " ",  # figure space
+    "\u2008": " ",
+    "\u2009": " ",  # thin space
+    "\u200a": " ",
+    "\u202f": " ",  # narrow NBSP
+    "\u205f": " ",
+    "\u3000": " ",  # 全角空格
+}
+_ZERO_WIDTH = "\u200b\u200c\u200d\ufeff\u2060"
+#: 连字符变体。``U+00AD`` 软连字符是 LaTeX 断词产物，**必须删掉**：
+#: 它不可见，却会让 ``min-heap`` 变成 ``min<SHY>heap``，进而把标识符劈成两半。
+_HYPHEN_MAP = {
+    "\u00ad": "",   # soft hyphen
+    "\u2010": "-",  # hyphen
+    "\u2011": "-",  # non-breaking hyphen
+}
+_LIGATURES = {
+    "\ufb00": "ff",
+    "\ufb01": "fi",
+    "\ufb02": "fl",
+    "\ufb03": "ffi",
+    "\ufb04": "ffl",
+    "\ufb05": "st",
+    "\ufb06": "st",
+}
+#: 同形异码点（homoglyph）。PDF 抽取时会撞上：字体里多个码点共用同一个字形，
+#: 反向映射可能挑到最冷门的那个。实跑中一次性撞齐了 ``空格→NBSP``、
+#: ``-→软连字符``、``;→希腊问号``。注意**不要**顺手把全角标点也转了——
+#: 中文行文里的 ``，。：`` 本该是全角，转成半角反而把中文排版弄坏。
+_CONFUSABLES = {
+    "\u037e": ";",  # GREEK QUESTION MARK（与分号同形）
+    "\u2212": "-",  # MINUS SIGN（LaTeX 公式里的减号）
+    "\u2044": "/",  # FRACTION SLASH
+}
+_UNI_TABLE = {**{ord(k): v for k, v in _SPACE_MAP.items()},
+              **{ord(c): "" for c in _ZERO_WIDTH},
+              **{ord(k): v for k, v in _HYPHEN_MAP.items()},
+              **{ord(k): v for k, v in _CONFUSABLES.items()},
+              **{ord(k): v for k, v in _LIGATURES.items()}}
+
+
+def normalize_unicode(text: str) -> str:
+    """归一化 PDF/HTML 抽取文本里的隐形字符（空白变体、零宽字符、连字）。"""
+    if not text:
+        return ""
+    return text.translate(_UNI_TABLE)
+
 
 def split_sentences(text: str) -> List[str]:
     if not text:

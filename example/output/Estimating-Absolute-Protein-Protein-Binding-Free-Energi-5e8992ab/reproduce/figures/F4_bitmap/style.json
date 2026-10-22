@@ -1,0 +1,74 @@
+{
+  "figures": [
+    {
+      "colors": [
+        "#ebf2f8",
+        "#dee9f3",
+        "#d2e0ed",
+        "#c0d5e5",
+        "#accadb",
+        "#93bbd2",
+        "#78aac8",
+        "#629abe",
+        "#4e8ab3",
+        "#3c78a8",
+        "#2c669b",
+        "#1e558d",
+        "#184477"
+      ],
+      "gradient": {
+        "direction": "lighten_down",
+        "from": "#ebf2f8",
+        "to": "#184477",
+        "axis": "vertical",
+        "note": "同一色板按柱序由浅到深（与原文一致）"
+      }
+    },
+    {
+      "colors": [
+        "#ebf2f8",
+        "#dee9f3",
+        "#d2e0ed",
+        "#c0d5e5",
+        "#accadb",
+        "#93bbd2",
+        "#78aac8",
+        "#629abe",
+        "#4e8ab3",
+        "#3c78a8",
+        "#2c669b",
+        "#1e558d",
+        "#184477"
+      ],
+      "gradient": {
+        "direction": "lighten_down",
+        "from": "#ebf2f8",
+        "to": "#184477",
+        "axis": "vertical",
+        "note": "同一色板按柱序由浅到深（与原文一致）"
+      }
+    },
+    {
+      "colors": [
+        "#ebf2f8",
+        "#d2e0ed",
+        "#c0d5e5",
+        "#accadb",
+        "#93bbd2",
+        "#78aac8",
+        "#4e7a97",
+        "#3c78a8",
+        "#2c669b",
+        "#1e558d",
+        "#184477"
+      ],
+      "gradient": {
+        "direction": "lighten_down",
+        "from": "#ebf2f8",
+        "to": "#184477",
+        "axis": "vertical",
+        "note": "同一色板按柱序由浅到深（与原文一致）"
+      }
+    }
+  ]
+}

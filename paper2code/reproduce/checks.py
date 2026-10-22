@@ -53,6 +53,60 @@ _SHARE_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: 只把**整格都是数值**的单元格当作数据。``to_number`` 会从 "parp1 ↓"、"5ht1b"
+#: 这类表头/标签里抠出数字，直接用在一致性校验上会污染最优值判定。
+_STRICT_NUM_RE = re.compile(
+    r"^\s*[<>≤≥~≈]?\s*[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?%?"
+    r"(?:\s*(?:±|\+-|\+/-)\s*\d+(?:\.\d+)?)?\s*$"
+)
+_DOWN_MARKERS = ("↓", "lower is better", "lower-better", "越低越好", "越小越好")
+_UP_MARKERS = ("↑", "higher is better", "higher-better", "越高越好", "越大越好")
+
+
+def _cell_number(value: Any) -> Optional[float]:
+    """整格数值才解析；标签行（如 "parp1 ↓"）返回 None。"""
+    s = str(value or "").strip()
+    if not s:
+        return None
+    s = s.replace("−", "-").replace("–", "-").replace("—", "-")
+    if not _STRICT_NUM_RE.match(s):
+        return None
+    return numutil.to_number(s)
+
+
+def _column_directions(table: Table) -> List[Optional[str]]:
+    """逐列判定「越大越好 / 越小越好」。
+
+    表头里的 ``↑`` / ``↓`` 最可靠；有些论文把指标名写成数据区上方的一行
+    （如 ``parp1 ↓``），因此数据开始前的行也要扫。方向只向紧邻的空表头列
+    传播一次，用于 ``Mean / Std`` 这类合并表头。
+    """
+    width = len(table.header) or max((len(r) for r in table.rows), default=0)
+    dirs: List[Optional[str]] = [None] * width
+
+    def scan(cells: Sequence[Any]) -> None:
+        for ci, cell in enumerate(list(cells)[:width]):
+            s = str(cell or "").lower()
+            if any(m in s for m in _DOWN_MARKERS):
+                dirs[ci] = "lower"
+            elif any(m in s for m in _UP_MARKERS):
+                dirs[ci] = "higher"
+
+    scan(table.header)
+    for row in table.rows:
+        if any(_cell_number(c) is not None for c in row):
+            break
+        scan(row)
+
+    last: Optional[str] = None
+    for ci in range(width):
+        header_empty = ci >= len(table.header) or not str(table.header[ci] or "").strip()
+        if dirs[ci] is not None:
+            last = dirs[ci]
+        elif last is not None and header_empty:
+            dirs[ci] = last
+    return dirs
+
 
 # --------------------------------------------------------------------------- #
 # 表格一致性
@@ -174,17 +228,24 @@ def _check_best_row_claim(table: Table, thresholds: Optional[Dict[str, float]]) 
         return []
 
     ri = ours_idx[0]
+    dirs = _column_directions(table)
+    # 最优值只能基于「整格是数值」的单元格计算：表头/标签行里的 "parp1"、"5ht1b"
+    # 会被宽松解析抠出 1/5 这类假数值，直接污染最优/最差判定。
+    strict = [[_cell_number(row[ci] if ci < len(row) else "") for ci in range(len(cols))]
+              for row in table.rows]
     for ci in range(1, len(cols)):
-        col_vals = [mat[r][ci] for r in range(len(mat)) if mat[r][ci] is not None]
-        mine = mat[ri][ci]
+        col_vals = [strict[r][ci] for r in range(len(strict)) if strict[r][ci] is not None]
+        mine = strict[ri][ci]
         if mine is None or len(col_vals) < 2:
             continue
         mx = max(col_vals)  # type: ignore[arg-type]
         mn = min(col_vals)  # type: ignore[arg-type]
         if abs(mx - mn) < 1e-12:
             continue
-        is_best = abs(mine - mx) < 1e-9
-        is_worst = abs(mine - mn) < 1e-9
+        lower_better = ci < len(dirs) and dirs[ci] == "lower"
+        best, worst = (mn, mx) if lower_better else (mx, mn)
+        is_best = abs(mine - best) < 1e-9
+        is_worst = abs(mine - worst) < 1e-9
         out.append(
             CheckResult(
                 name="最优性声明",
@@ -192,12 +253,14 @@ def _check_best_row_claim(table: Table, thresholds: Optional[Dict[str, float]]) 
                 status="pass" if is_best else ("warn" if not is_worst else "fail"),
                 detail=(
                     f"「{str(table.rows[ri][0]).strip()}」在该列为 {mine:.6g}，"
-                    f"全表最优 {mx:.6g}、最差 {mn:.6g} → "
+                    f"全表最优 {best:.6g}、最差 {worst:.6g}"
+                    + ("（越小越好）" if lower_better else "（越大越好）")
+                    + " → "
                     + ("确为最优" if is_best else ("处于最差" if is_worst else "非最优"))
                 ),
-                expected=mx,
+                expected=best,
                 actual=mine,
-                rel_delta=numutil.rel_delta(mx, mine),
+                rel_delta=numutil.rel_delta(best, mine),
             )
         )
     return out
@@ -225,6 +288,11 @@ def _check_rank_column(table: Table) -> List[CheckResult]:
 
 
 _COUNT_RE = re.compile(r"(count|number|num_|_num|\bsize\b|\bn\b|n_|数量|样本数|计数|个数)", re.IGNORECASE)
+
+# 公开别名：`mvp.claims` 用它从论文表格派生「可检验声明」（M1-④），
+# 保证「占比列 / 计数列」的判据全仓只有一处定义，不会两边漂移。
+SHARE_COL_RE = _SHARE_RE
+COUNT_COL_RE = _COUNT_RE
 
 
 def _check_non_negative_counts(table: Table) -> List[CheckResult]:

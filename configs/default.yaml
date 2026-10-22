@@ -5,17 +5,46 @@
 # offline：零依赖、纯规则/抽取式，开箱即用
 # openai ：任何 OpenAI 兼容端点（OpenAI / DeepSeek / 通义 / vLLM / Ollama）
 llm_mode: offline
-llm_base_url: https://api.deepseek.com/v1 #https://api.openai.com/v1
+llm_base_url: https://api.openai.com/v1
 llm_api_key: ""
-llm_model: deepseek-flash #gpt-4o-mini
+llm_model: gpt-4o-mini
 llm_timeout: 120
 llm_temperature: 0.3
 
+# --- 成本护栏（每篇论文的硬上限；0 = 不限制） ---
+# 超限时 MVP 的 LLM 路径会停用并降级为离线脚手架，且如实写进 warnings
+# 实测（deepseek-flash 等真实端点，含 3 轮修复）：**单篇约 12 万 token**，
+# 所以默认上限至少要到 20–30 万才有机会让一篇生成跑完，否则刚生成到一半就被停用。
+cost_max_calls: 40         # LLM 调用次数上限
+cost_max_tokens: 300000    # 累计 token 上限（实测单篇 ~12 万，留 2–3 倍余量）
+cost_max_seconds: 900      # 累计耗时上限（秒）
+
 # --- 语音合成 ---
-# auto：有 edge-tts 就用，否则降级；edge：强制（缺失则只出字幕）；off：完全关闭
+# auto：edge-tts（音质好）→ Windows 内置 SAPI（完全离线，单音色）→ 静音占位；逐个真试，失败原因写进 warnings
+# edge：强制 edge-tts（缺失只出字幕）；sapi：强制系统语音；off：完全关闭
 tts_mode: auto
 tts_voice_a: zh-CN-YunxiNeural     # 主持人（男声）
 tts_voice_b: zh-CN-XiaoxiaoNeural  # 讲解人（女声）
+# 逐说话人韵律：让双人对谈听得出两个人（不再是同一个腔调念稿）
+tts_rate_a: "+8%"          # 主持人语速（稍快、有活力）
+tts_rate_b: "+0%"          # 讲解人语速（平稳）
+tts_pitch_a: "+2Hz"
+tts_pitch_b: "-2Hz"
+tts_volume: "+0%"
+tts_question_rate: "+12%"  # 问句语速
+tts_question_pitch: "+8Hz" # 问句抬语调，避免「一条直线」的念稿感
+tts_pause: "……"           # 轮次间停顿标记（置空则关闭）
+
+# 系统语音（SAPI）韵律：单音色时用更大的语速/音高差 + 问句语调区分角色
+tts_sapi_voice: ""         # 空 = 自动挑第一个中文音色
+tts_sapi_rate_a: "+22%"    # 主持人：明显更快
+tts_sapi_rate_b: "-10%"    # 讲解人：更慢
+tts_sapi_pitch_a: "+10Hz"  # 主持人：更高
+tts_sapi_pitch_b: "-8Hz"   # 讲解人：更低
+tts_sapi_question_rate: "+8%"
+tts_sapi_question_pitch: "+14Hz"
+tts_sapi_volume: "+0%"
+tts_sapi_break_ms: 450     # 每轮后的停顿（毫秒）
 
 # --- 复现约束（单机 + 小数据集） ---
 max_records: 10000     # 单次执行的数据记录上限
@@ -28,3 +57,10 @@ rel_warn: 0.20         # 相对误差 <=20% 记为 warn，超过为 fail
 # --- 讲解材料 ---
 max_slides: 14
 style: teaching        # teaching | executive | exam
+
+# --- MVP 自动生成（统计图 + 配套作图代码 demo） ---
+mvp_enabled: true       # 处理论文时同时生成 MVP demo + 图表绘制说明 + 绘图代码
+mvp_use_llm: true       # false = 只用离线脚手架（零 Key、零网络）
+mvp_max_fix: 3          # demo 运行失败后的 LLM 修复轮数
+mvp_max_fix_fig: 2      # 单张图绘制脚本的修复轮数
+mvp_smoke_timeout: 90   # smoke 运行超时（秒）

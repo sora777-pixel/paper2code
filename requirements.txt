@@ -25,4 +25,3 @@ uvicorn>=0.29
 
 # --- 网络抓取（arXiv；缺失时回退 urllib） ---
 requests>=2.31
-python-multipart>=0.0.9

@@ -1,0 +1,1405 @@
+{
+  "paper_id": "Estimating-Absolute-Protein-Protein-Binding-Free-Energi-5e8992ab",
+  "mode": "open_source",
+  "ok": true,
+  "generated": [
+    "./reproduce/repro_plan.json",
+    "./reproduce/figures/F3_bitmap/preview_F3.png",
+    "./reproduce/figures/F3_bitmap/data.csv",
+    "./reproduce/figures/F3_bitmap/draw_F3.py",
+    "./reproduce/figures/F3_bitmap/style.json",
+    "./reproduce/figures/F3_bitmap/meta.json",
+    "./reproduce/figures/F4_bitmap/preview_F4.png",
+    "./reproduce/figures/F4_bitmap/data.csv",
+    "./reproduce/figures/F4_bitmap/draw_F4.py",
+    "./reproduce/figures/F4_bitmap/style.json",
+    "./reproduce/figures/F4_bitmap/meta.json",
+    "./reproduce/figures/F5_bitmap/preview_F5.png",
+    "./reproduce/figures/F5_bitmap/data.csv",
+    "./reproduce/figures/F5_bitmap/draw_F5.py",
+    "./reproduce/figures/F5_bitmap/style.json",
+    "./reproduce/figures/F5_bitmap/meta.json",
+    "./reproduce/figures/F6_bitmap/preview_F6.png",
+    "./reproduce/figures/F6_bitmap/draw_F6.py",
+    "./reproduce/figures/F6_bitmap/style.json",
+    "./reproduce/figures/F6_bitmap/meta.json",
+    "./reproduce/TECH_GUIDE.md",
+    "./reproduce/repro_report.md",
+    "./reproduce/repro_report.html"
+  ],
+  "table_csv": {},
+  "figure_files": [
+    "./reproduce/figures/F3_bitmap/preview_F3.png",
+    "./reproduce/figures/F4_bitmap/preview_F4.png",
+    "./reproduce/figures/F5_bitmap/preview_F5.png",
+    "./reproduce/figures/F6_bitmap/preview_F6.png"
+  ],
+  "deltas": [],
+  "summary": {
+    "mode": "open_source",
+    "mode_label": "情形 A · 附带开源代码",
+    "mode_decision": {
+      "mode": "open_source",
+      "confidence": 0.9,
+      "reason": "论文正文给出代码仓库链接，按「有开源代码」处理",
+      "evidence": [
+        "代码链接：https://github.com/chavesejf/PBEE（出处：link: https://github.com/chavesejf/PBEE. In addition, PBEE…）",
+        "代码链接：https://colab.research.google.com/drive/1lu1dC0yRltKK_Wp-gF26oHcZSCiHaI8b（出处：use are available at: https://colab.research.google.com/drive/1lu1dC0yRltKK_Wp-g…）",
+        "代码链接：https://colab.research.google.com/drive/1lu1d-C0yRltKK_Wp-gF26oHcZSCiHaI8b（出处：link: https://colab.research.google.com/drive/1lu1d-C0yRltKK_Wp-gF26oHcZSCiHaI8b…）",
+        "正文表述：computationally demanding methods and currently available ML/DL tools. The method was encoded into an application Python"
+      ]
+    },
+    "datasets": {},
+    "checks": {
+      "total": 0,
+      "pass": 0,
+      "warn": 0,
+      "fail": 0,
+      "skipped": 0,
+      "score": 0.0,
+      "verdict": "not_verifiable"
+    },
+    "deltas_summary": {
+      "n_judged": 0,
+      "pass_rate": null,
+      "median_rel_delta": null,
+      "max_rel_delta": null
+    },
+    "figures_redrawn": 4,
+    "bitmap_digitization": [
+      {
+        "figure": "F1",
+        "caption": "Schematic representation of the SL pipeline, which undergoes three steps. (A) The full training set is used to train 10 ",
+        "state": "skipped",
+        "chart_type": "",
+        "colorbar": null,
+        "why": "未检测到坐标轴边框（示意图、流程图或纯图片，非可标定统计图）",
+        "confidence": null,
+        "n_panels": 0,
+        "panels": [],
+        "files": {},
+        "disclaimer": "从 PDF 中读取或识别的数值不等同于原文献数值（位图反推，仅供绘图对照）"
+      },
+      {
+        "figure": "F2",
+        "caption": "PBEE flowchart for the protein-protein complex structure PDB ID 1XGU, corresponding to antibody (HyHEL-63) that binds to",
+        "state": "skipped",
+        "why": "未找到该图的图片文件（PDF 里可能未提取出图资产）",
+        "confidence": null,
+        "n_panels": 0,
+        "panels": [],
+        "files": {},
+        "disclaimer": "从 PDF 中读取或识别的数值不等同于原文献数值（位图反推，仅供绘图对照）"
+      },
+      {
+        "figure": "F3",
+        "caption": "Regressions on the validation set using PRODIGY, Rosetta, and the trained ML and SL models (RMSE: root-mean-square error",
+        "state": "ok",
+        "chart_type": "",
+        "colorbar": null,
+        "why": "",
+        "confidence": 0.45,
+        "n_panels": 13,
+        "panels": [
+          {
+            "panel": 1,
+            "kind": "scatter",
+            "count": 53,
+            "values": [
+              [
+                -3.029,
+                -4.137
+              ],
+              [
+                -0.913,
+                -4.226
+              ],
+              [
+                -3.413,
+                -4.286
+              ],
+              [
+                -7.212,
+                -6.964
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0366,
+              "edge_color": "#020304",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#45718c",
+                "#325063",
+                "#08306b"
+              ],
+              "n_series": 4
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.4059,
+              "x_span_px": [
+                158,
+                483
+              ],
+              "slope": 0.499,
+              "intercept": -4.9501,
+              "x_range": [
+                -16.442,
+                -0.817
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -11.012
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -10.913
+              }
+            ]
+          },
+          {
+            "panel": 2,
+            "kind": "scatter",
+            "count": 56,
+            "values": [
+              [
+                -3.413,
+                -4.848
+              ],
+              [
+                -3.125,
+                -7.306
+              ],
+              [
+                -7.212,
+                -7.483
+              ],
+              [
+                -6.562,
+                -7.534
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0366,
+              "edge_color": "#020405",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#6b98b1",
+                "#46748e",
+                "#325264",
+                "#08306b"
+              ],
+              "n_series": 5
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.3345,
+              "x_span_px": [
+                158,
+                483
+              ],
+              "slope": 0.3486,
+              "intercept": -6.8189,
+              "x_range": [
+                -16.442,
+                -0.817
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -10.929
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -11.01
+              }
+            ]
+          },
+          {
+            "panel": 3,
+            "kind": "scatter",
+            "count": 52,
+            "values": [
+              [
+                -3.476,
+                -4.923
+              ],
+              [
+                -3.19,
+                -7.143
+              ],
+              [
+                -7.286,
+                -7.5
+              ],
+              [
+                -6.595,
+                -7.551
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0366,
+              "edge_color": "#020406",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#6994aa",
+                "#203642",
+                "#08306b"
+              ],
+              "n_series": 4
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.3394,
+              "x_span_px": [
+                688,
+                1013
+              ],
+              "slope": 0.361,
+              "intercept": -6.6968,
+              "x_range": [
+                -16.429,
+                -0.952
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -10.918
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -10.952
+              }
+            ]
+          },
+          {
+            "panel": 4,
+            "kind": "scatter",
+            "count": 56,
+            "values": [
+              [
+                -3.413,
+                -3.92
+              ],
+              [
+                -3.173,
+                -4.773
+              ],
+              [
+                -0.913,
+                -5.028
+              ],
+              [
+                -7.26,
+                -6.847
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0367,
+              "edge_color": "#020404",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#6f98bc",
+                "#5083a1",
+                "#08306b"
+              ],
+              "n_series": 4
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.3798,
+              "x_span_px": [
+                1219,
+                1544
+              ],
+              "slope": 0.4436,
+              "intercept": -5.6962,
+              "x_range": [
+                -16.49,
+                -0.865
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -10.909
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -11.01
+              }
+            ]
+          },
+          {
+            "panel": 5,
+            "kind": "scatter",
+            "count": 55,
+            "values": [
+              [
+                -3.413,
+                -3.125
+              ],
+              [
+                -3.125,
+                -4.412
+              ],
+              [
+                -0.913,
+                -4.485
+              ],
+              [
+                -7.115,
+                -6.654
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0366,
+              "edge_color": "#020405",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#507e9a",
+                "#08306b",
+                "#101b22"
+              ],
+              "n_series": 4
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.2913,
+              "x_span_px": [
+                1750,
+                2075
+              ],
+              "slope": 0.4424,
+              "intercept": -5.8877,
+              "x_range": [
+                -16.442,
+                -0.817
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -10.956
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -10.913
+              }
+            ]
+          },
+          {
+            "panel": 6,
+            "kind": "scatter",
+            "count": 63,
+            "values": [
+              [
+                -8.99,
+                -8.154
+              ],
+              [
+                -7.788,
+                -8.692
+              ],
+              [
+                -9.423,
+                -8.8
+              ],
+              [
+                -9.327,
+                -9.0
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0366,
+              "edge_color": "#020405",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#477690",
+                "#1f3340",
+                "#08306b"
+              ],
+              "n_series": 4
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.1217,
+              "x_span_px": [
+                158,
+                483
+              ],
+              "slope": 0.0389,
+              "intercept": -9.7142,
+              "x_range": [
+                -16.442,
+                -0.817
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -10.923
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -10.913
+              }
+            ]
+          },
+          {
+            "panel": 7,
+            "kind": "scatter",
+            "count": 60,
+            "values": [
+              [
+                -3.476,
+                -1.389
+              ],
+              [
+                -6.476,
+                -5.324
+              ],
+              [
+                -9.286,
+                -5.926
+              ],
+              [
+                -7.214,
+                -6.157
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0366,
+              "edge_color": "#020405",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#5991a6",
+                "#426d86",
+                "#32525e",
+                "#08306b"
+              ],
+              "n_series": 5
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.2372,
+              "x_span_px": [
+                688,
+                1014
+              ],
+              "slope": 0.4563,
+              "intercept": -5.6981,
+              "x_range": [
+                -16.429,
+                -0.905
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -11.019
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -10.952
+              }
+            ]
+          },
+          {
+            "panel": 8,
+            "kind": "scatter",
+            "count": 58,
+            "values": [
+              [
+                -3.413,
+                -5.955
+              ],
+              [
+                -0.913,
+                -5.955
+              ],
+              [
+                -8.702,
+                -6.517
+              ],
+              [
+                -7.26,
+                -6.742
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0367,
+              "edge_color": "#020203",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#5b96b5",
+                "#426c85",
+                "#243c49",
+                "#08306b"
+              ],
+              "n_series": 5
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.2709,
+              "x_span_px": [
+                1219,
+                1544
+              ],
+              "slope": 0.3146,
+              "intercept": -6.8065,
+              "x_range": [
+                -16.49,
+                -0.865
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -11.011
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -10.962
+              }
+            ]
+          },
+          {
+            "panel": 9,
+            "kind": "scatter",
+            "count": 56,
+            "values": [
+              [
+                -3.469,
+                -5.244
+              ],
+              [
+                -3.182,
+                -7.289
+              ],
+              [
+                -10.789,
+                -7.776
+              ],
+              [
+                -7.249,
+                -7.825
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0366,
+              "edge_color": "#020405",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#5183a2",
+                "#08306b"
+              ],
+              "n_series": 3
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.2985,
+              "x_span_px": [
+                1750,
+                2075
+              ],
+              "slope": 0.3022,
+              "intercept": -7.241,
+              "x_range": [
+                -16.435,
+                -0.885
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -10.99
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -10.933
+              }
+            ]
+          },
+          {
+            "panel": 10,
+            "kind": "scatter",
+            "count": 74,
+            "values": [
+              [
+                -8.99,
+                -6.535
+              ],
+              [
+                -9.351,
+                -6.842
+              ],
+              [
+                -7.909,
+                -7.127
+              ],
+              [
+                -7.5,
+                -7.325
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0366,
+              "edge_color": "#020304",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#35586b",
+                "#08306b"
+              ],
+              "n_series": 3
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.1125,
+              "x_span_px": [
+                158,
+                483
+              ],
+              "slope": 0.1025,
+              "intercept": -9.6962,
+              "x_range": [
+                -16.442,
+                -0.817
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -10.921
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -10.913
+              }
+            ]
+          },
+          {
+            "panel": 11,
+            "kind": "scatter",
+            "count": 60,
+            "values": [
+              [
+                -7.286,
+                -23.026
+              ],
+              [
+                -7.167,
+                -30.263
+              ],
+              [
+                -7.905,
+                -32.895
+              ],
+              [
+                -11.048,
+                -33.553
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0366,
+              "edge_color": "#020405",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#497894",
+                "#08306b"
+              ],
+              "n_series": 3
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.0457,
+              "x_span_px": [
+                688,
+                1014
+              ],
+              "slope": 0.6357,
+              "intercept": -56.3327,
+              "x_range": [
+                -16.429,
+                -0.905
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -9.868
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -10.952
+              }
+            ]
+          },
+          {
+            "panel": 12,
+            "kind": "scatter",
+            "count": 55,
+            "values": [
+              [
+                -3.413,
+                -4.468
+              ],
+              [
+                -10.745,
+                -4.947
+              ],
+              [
+                -6.587,
+                -6.117
+              ],
+              [
+                -8.365,
+                -6.436
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0367,
+              "edge_color": "#020304",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#1d303a",
+                "#08306b"
+              ],
+              "n_series": 3
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.3948,
+              "x_span_px": [
+                1219,
+                1544
+              ],
+              "slope": 0.4357,
+              "intercept": -5.5279,
+              "x_range": [
+                -16.49,
+                -0.865
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -10.957
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -10.962
+              }
+            ]
+          },
+          {
+            "panel": 13,
+            "kind": "scatter",
+            "count": 61,
+            "values": [
+              [
+                -10.789,
+                -5.741
+              ],
+              [
+                -3.469,
+                -7.176
+              ],
+              [
+                -6.627,
+                -7.546
+              ],
+              [
+                -10.55,
+                -7.685
+              ]
+            ],
+            "marker": {
+              "diameter_px": 13.0,
+              "diameter_ratio": 0.0366,
+              "edge_color": "#020406",
+              "edge_present": true,
+              "fills": [
+                "#6aaed6",
+                "#6a9cb4",
+                "#3e677e",
+                "#08306b"
+              ],
+              "n_series": 4
+            },
+            "trend_line": {
+              "kind": "trend",
+              "color": "#ff0000",
+              "width_px": 5.0,
+              "slope_px": -0.3593,
+              "x_span_px": [
+                1750,
+                2075
+              ],
+              "slope": 0.3439,
+              "intercept": -6.6627,
+              "x_range": [
+                -16.435,
+                -0.885
+              ]
+            },
+            "reference_lines": [
+              {
+                "orientation": "h",
+                "style": "dashed",
+                "value": -10.972
+              },
+              {
+                "orientation": "v",
+                "style": "dashed",
+                "value": -10.981
+              }
+            ]
+          }
+        ],
+        "files": {
+          "meta": "./reproduce/figures/F3_bitmap/meta.json",
+          "csv": "./reproduce/figures/F3_bitmap/data.csv",
+          "style": "./reproduce/figures/F3_bitmap/style.json",
+          "script": "./reproduce/figures/F3_bitmap/draw_F3.py",
+          "preview": "./reproduce/figures/F3_bitmap/preview_F3.png"
+        },
+        "disclaimer": "从 PDF 中读取或识别的数值不等同于原文献数值（位图反推，仅供绘图对照）"
+      },
+      {
+        "figure": "F4",
+        "caption": "Comparison of PBEE prediction accuracy by ML method to Rosetta and PRODIGY, for the three protein-protein complex data s",
+        "state": "ok",
+        "chart_type": "",
+        "colorbar": null,
+        "why": "",
+        "confidence": 0.97,
+        "n_panels": 3,
+        "panels": [
+          {
+            "panel": 1,
+            "kind": "bar",
+            "orientation": "h",
+            "count": 13,
+            "values": [
+              0.224,
+              0.065,
+              0.553,
+              0.889,
+              0.629,
+              0.63
+            ],
+            "gradient": {
+              "direction": "lighten_down",
+              "from": "#ebf2f8",
+              "to": "#184477",
+              "axis": "vertical",
+              "note": "同一色板按柱序由浅到深（与原文一致）"
+            },
+            "colors": [
+              "#ebf2f8",
+              "#dee9f3",
+              "#d2e0ed"
+            ]
+          },
+          {
+            "panel": 2,
+            "kind": "bar",
+            "orientation": "h",
+            "count": 13,
+            "values": [
+              0.169,
+              0.104,
+              0.632,
+              0.574,
+              0.097,
+              0.426
+            ],
+            "gradient": {
+              "direction": "lighten_down",
+              "from": "#ebf2f8",
+              "to": "#184477",
+              "axis": "vertical",
+              "note": "同一色板按柱序由浅到深（与原文一致）"
+            },
+            "colors": [
+              "#ebf2f8",
+              "#dee9f3",
+              "#d2e0ed"
+            ]
+          },
+          {
+            "panel": 3,
+            "kind": "bar",
+            "orientation": "h",
+            "count": 11,
+            "values": [
+              -0.207,
+              0.673,
+              0.648,
+              0.462,
+              0.495,
+              0.178
+            ],
+            "gradient": {
+              "direction": "lighten_down",
+              "from": "#ebf2f8",
+              "to": "#184477",
+              "axis": "vertical",
+              "note": "同一色板按柱序由浅到深（与原文一致）"
+            },
+            "colors": [
+              "#ebf2f8",
+              "#d2e0ed",
+              "#c0d5e5"
+            ]
+          }
+        ],
+        "files": {
+          "meta": "./reproduce/figures/F4_bitmap/meta.json",
+          "csv": "./reproduce/figures/F4_bitmap/data.csv",
+          "style": "./reproduce/figures/F4_bitmap/style.json",
+          "script": "./reproduce/figures/F4_bitmap/draw_F4.py",
+          "preview": "./reproduce/figures/F4_bitmap/preview_F4.png"
+        },
+        "disclaimer": "从 PDF 中读取或识别的数值不等同于原文献数值（位图反推，仅供绘图对照）"
+      },
+      {
+        "figure": "F5",
+        "caption": "PBEE processing time as a function of the number of atoms",
+        "state": "ok",
+        "chart_type": "",
+        "colorbar": null,
+        "why": "",
+        "confidence": 0.97,
+        "n_panels": 1,
+        "panels": [
+          {
+            "panel": 1,
+            "kind": "bar",
+            "orientation": "v",
+            "count": 4,
+            "values": [
+              5.153,
+              1.156,
+              0.518,
+              0.478
+            ],
+            "gradient": null,
+            "colors": [
+              "#4682b4",
+              "#4682b4",
+              "#4682b4"
+            ]
+          }
+        ],
+        "files": {
+          "meta": "./reproduce/figures/F5_bitmap/meta.json",
+          "csv": "./reproduce/figures/F5_bitmap/data.csv",
+          "style": "./reproduce/figures/F5_bitmap/style.json",
+          "script": "./reproduce/figures/F5_bitmap/draw_F5.py",
+          "preview": "./reproduce/figures/F5_bitmap/preview_F5.png"
+        },
+        "disclaimer": "从 PDF 中读取或识别的数值不等同于原文献数值（位图反推，仅供绘图对照）"
+      },
+      {
+        "figure": "F6",
+        "caption": "Feature importance is based on SHAP-values. The violin",
+        "state": "style_only",
+        "chart_type": "beeswarm",
+        "colorbar": {
+          "x_range": [
+            908,
+            922
+          ],
+          "y_range": [
+            7,
+            1130
+          ],
+          "height_ratio": 0.942,
+          "colors_high_to_low": [
+            "#fe005c",
+            "#9c23ad",
+            "#0083f8"
+          ]
+        },
+        "why": "蜂群图无法逐点还原数值；本条目复现原图的布局、小提琴轮廓与配色",
+        "confidence": 0.0,
+        "n_panels": 0,
+        "panels": [],
+        "files": {
+          "meta": "./reproduce/figures/F6_bitmap/meta.json",
+          "style": "./reproduce/figures/F6_bitmap/style.json",
+          "script": "./reproduce/figures/F6_bitmap/draw_F6.py",
+          "preview": "./reproduce/figures/F6_bitmap/preview_F6.png"
+        },
+        "disclaimer": "从 PDF 中读取或识别的数值不等同于原文献数值（位图反推，仅供绘图对照）"
+      },
+      {
+        "figure": "E1_173",
+        "caption": "",
+        "state": "skipped",
+        "chart_type": "",
+        "colorbar": null,
+        "why": "检测到 1 个边框，但均未能标定：刻度线不足 2 个",
+        "confidence": null,
+        "n_panels": 0,
+        "panels": [],
+        "files": {},
+        "disclaimer": "从 PDF 中读取或识别的数值不等同于原文献数值（位图反推，仅供绘图对照）"
+      }
+    ],
+    "repo_status": "cloned",
+    "repo_status_label": "已克隆自有仓库",
+    "repo_url": "https://github.com/chavesejf/PBEE",
+    "repo_candidates": [
+      {
+        "url": "https://github.com/chavesejf/PBEE",
+        "role": "own_code",
+        "confidence": 0.7,
+        "subpath": "",
+        "reason": "+2 仓库名与论文/上下文匹配"
+      }
+    ],
+    "repo_attempts": [
+      {
+        "url": "https://github.com/chavesejf/PBEE",
+        "role": "own_code",
+        "confidence": 0.7,
+        "subpath": "",
+        "probe": {
+          "ok": true,
+          "status": "reachable",
+          "heads": 1
+        },
+        "clone": {
+          "ok": true,
+          "path": "./reproduce/repo"
+        }
+      }
+    ],
+    "repo_manifest": "./reproduce/repo_manifest.json",
+    "repro_run_script": "./reproduce/repro_run.sh",
+    "repo_result_files": [],
+    "repo_available": true,
+    "smoke_dir": "./reproduce/smoke",
+    "smoke_plan": {
+      "entrypoint": "pbee.py",
+      "command": [
+        "pbee.py",
+        "--ipdb",
+        "./reproduce/repo/tests/pdbs/1xgu.pdb",
+        "--partner1",
+        "AB",
+        "--partner2",
+        "C",
+        "--odir",
+        "./reproduce/smoke/outputs"
+      ],
+      "cwd": "./reproduce/repo",
+      "source": "readme-example",
+      "env": {
+        "OMP_NUM_THREADS": "1",
+        "CUDA_VISIBLE_DEVICES": "",
+        "MPLBACKEND": "Agg",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONHASHSEED": "0",
+        "P2C_SEED": "0"
+      },
+      "timeout_s": 180,
+      "required_modules": [
+        "pandas",
+        "pyrosetta"
+      ],
+      "declared_requirements": [
+        "numpy=1.24.4",
+        "pandas=2.0.3",
+        "scikit-learn=1.3.0",
+        "scipy=1.14.1",
+        "xgboost==2.0.1"
+      ],
+      "blockers": [
+        "缺少依赖：pandas、pyrosetta、scipy、sklearn、xgboost（pip install pandas scikit-learn scipy xgboost；pyrosetta 不是 PyPI 包：需按官方说明安装（`python -c \"import pyrosetta_installer; pyrosetta_installer.install_pyrosetta()\"`），且需要 Rosetta 许可），无法在本机跑 smoke"
+      ],
+      "notes": [
+        "smoke 命令取自 README 已文档化的示例（不猜 flag）",
+        "多/通配输入缩成单个样本：1xgu.pdb",
+        "输出目录改到 smoke 工作目录（不污染仓库）",
+        "入口不可用（缺少依赖：pandas、pyrosetta、scipy、sklearn、xgboost（pip install pandas scikit-learn scipy xgboost；pyrosetta 不是 PyPI 包：需按官方说明安装（`），改走 library 模式：直接调用仓库自带的 `modules.superlearner.train_base_models` —— 这只是**代码路径 smoke**，不是论文数值复现。"
+      ],
+      "mode": "library",
+      "interpreter": "current",
+      "missing_dependencies": [
+        "pandas",
+        "pyrosetta",
+        "scipy",
+        "sklearn",
+        "xgboost"
+      ],
+      "install_hint": "pip install pandas scikit-learn scipy xgboost",
+      "env_install": {
+        "status": "not_enabled",
+        "specs": [
+          "numpy=1.24.4",
+          "pandas=2.0.3",
+          "scikit-learn=1.3.0",
+          "scipy=1.14.1",
+          "xgboost==2.0.1"
+        ],
+        "venv": "./reproduce/venv",
+        "scripts": {
+          "lock": "./reproduce/requirements.lock.txt",
+          "ps1": "./reproduce/install_env.ps1",
+          "sh": "./reproduce/install_env.sh"
+        },
+        "note": "自动安装未开启；可执行 install_env.ps1 / install_env.sh，或加 --install-repo-deps（等价于 P2C_REPO_VENV_AUTO=1）"
+      },
+      "library": {
+        "module": "modules.superlearner",
+        "file": "modules/superlearner.py",
+        "train": "train_base_models",
+        "train_params": [
+          "x",
+          "y",
+          "models"
+        ],
+        "predict": "super_learner_predictions",
+        "predict_params": [
+          "X_test",
+          "models",
+          "meta_model"
+        ]
+      }
+    },
+    "smoke_result": {
+      "status": "failed",
+      "mode": "library",
+      "metrics": {},
+      "note": "代码路径 smoke（合成输入），不是论文数值复现",
+      "reason": "ModuleNotFoundError: No module named 'joblib'",
+      "traceback": "Traceback (most recent call last):\n  File \"./reproduce\\smoke\\run_smoke.py\", line 95, in main\n    mod = importlib.import_module(api[\"module\"])\n  File \"<python>/versions\\3.13.12\\Lib\\importlib\\__init__.py\", line 88, in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen importlib._bootstrap>\", line 1395, in _gcd_import\n  File \"<frozen importlib._bootstrap>\", line 1360, in _find_and_load\n  File \"<frozen importlib._bootstrap>\", line 1331, in _find_and_load_unlocked\n  File \"<frozen importlib._bootstrap>\", line 935, in _load_unlocked\n  File \"<frozen importlib._bootstrap_external>\", line 1023, in exec_module\n  File \"<frozen importlib._bootstrap>\", line 488, in _call_with_frames_removed\n  File \"./reproduce\\repo\\modules\\superlearner.py\", line 4, in <module>\n    import pickle, joblib\nModuleNotFoundError: No module named 'joblib'\n",
+      "status_label": "运行失败",
+      "entrypoint": "pbee.py",
+      "missing_dependencies": [
+        "pandas",
+        "pyrosetta",
+        "scipy",
+        "sklearn",
+        "xgboost"
+      ]
+    },
+    "smoke_attempts": [
+      {
+        "entrypoint": "pbee.py",
+        "status": "failed",
+        "reason": "ModuleNotFoundError: No module named 'joblib'",
+        "missing_dependencies": [
+          "pandas",
+          "pyrosetta",
+          "scipy",
+          "sklearn",
+          "xgboost"
+        ]
+      }
+    ],
+    "env_install": {
+      "status": "not_enabled",
+      "specs": [
+        "numpy=1.24.4",
+        "pandas=2.0.3",
+        "scikit-learn=1.3.0",
+        "scipy=1.14.1",
+        "xgboost==2.0.1"
+      ],
+      "venv": "./reproduce/venv",
+      "scripts": {
+        "lock": "./reproduce/requirements.lock.txt",
+        "ps1": "./reproduce/install_env.ps1",
+        "sh": "./reproduce/install_env.sh"
+      },
+      "note": "自动安装未开启；可执行 install_env.ps1 / install_env.sh，或加 --install-repo-deps（等价于 P2C_REPO_VENV_AUTO=1）"
+    },
+    "tech_guide": "./reproduce/TECH_GUIDE.md",
+    "data_sources": [
+      {
+        "name": "PDBbind",
+        "url": "http://www.pdbbind.org.cn/",
+        "evidence": "PDBbind,27 (ii) PRODIGY,18 (iii) SKEMPI2,28 and (iv)"
+      },
+      {
+        "name": "Docking Benchmark (5.5)",
+        "url": "https://zlab.umassmed.edu/benchmark/",
+        "evidence": "protein-protein docking benchmark version 5"
+      },
+      {
+        "name": "SKEMPI / SKEMPI2",
+        "url": "https://life.bsc.es/pid/skempi2",
+        "evidence": "PDBbind,27 (ii) PRODIGY,18 (iii) SKEMPI2,28 and (iv)"
+      },
+      {
+        "name": "PRODIGY",
+        "url": "https://wenmr.science.uu.nl/prodigy/",
+        "evidence": "PDBbind,27 (ii) PRODIGY,18 (iii) SKEMPI2,28 and (iv)"
+      }
+    ],
+    "selection_criteria": [
+      {
+        "name": "结构分辨率门槛",
+        "quote": "gaps or missing heavy atoms and with a maximum resolution of\n2.5 Å",
+        "note": "**晶体结构质量门槛**：分辨率数值越小、电子密度越清楚。用它筛掉低质量结构，是 X 射线结构数据集的标准做法；换数据源时必须沿用同一门槛，否则不可比。",
+        "metric": "分辨率（Å）",
+        "section": "METHODS"
+      },
+      {
+        "name": "去冗余",
+        "quote": "Size of Nonredundant Data Set of Protein-Protein",
+        "note": "在相似结构/复合物之间只保留一条，防止数据泄漏。",
+        "metric": "去冗余规则",
+        "section": "METHODS"
+      },
+      {
+        "name": "实验结构类型限制",
+        "quote": "We have initially selected 603 X-ray resolved",
+        "note": "只取**实验解析**的晶体结构（区别于 NMR、冷冻电镜与预测模型），决定了数据可获取性与误差量级。",
+        "metric": "结构来源类型",
+        "section": "METHODS"
+      }
+    ],
+    "method_tools": [
+      {
+        "name": "Rosetta",
+        "purpose": "蛋白结构建模与能量计算",
+        "evidence": "using the Rosetta software according to the following protocol:"
+      },
+      {
+        "name": "PyRosetta",
+        "purpose": "Rosetta 的 Python 接口",
+        "evidence": "It uses PyRosetta to"
+      },
+      {
+        "name": "XGBoost",
+        "purpose": "梯度提升树",
+        "evidence": "XGBoost"
+      }
+    ],
+    "workflow": {
+      "steps": [
+        {
+          "n": 1,
+          "name": "Data Sets",
+          "detail": "",
+          "evidence": "段首小节标题（run-in heading）"
+        },
+        {
+          "n": 2,
+          "name": "Structure Preprocessing",
+          "detail": "",
+          "evidence": "段首小节标题（run-in heading）"
+        },
+        {
+          "n": 3,
+          "name": "Structure Postprocessing",
+          "detail": "",
+          "evidence": "段首小节标题（run-in heading）"
+        },
+        {
+          "n": 4,
+          "name": "Geometry Optimization",
+          "detail": "",
+          "evidence": "段首小节标题（run-in heading）"
+        },
+        {
+          "n": 5,
+          "name": "Descriptors of Protein-Protein Association",
+          "detail": "",
+          "evidence": "段首小节标题（run-in heading）"
+        }
+      ],
+      "source": "方法部分段首的「小节标题 + 正文」写法（此刊把方法阶段嵌在段落开头）",
+      "note": "这些阶段名取自段首的小节标题（作者用的「标题式短语 + 句号」写法），顺序按正文出现次序；个别阶段可能被拆到别的段落里，请回原文核对完整性。"
+    }
+  },
+  "stdout": "",
+  "warnings": [
+    "仓库内未找到可与论文表格直接对齐的结果文件；已生成 repro_run.sh，请先执行脚本产出 results/*.csv，再重新运行复现环节即可自动对标。",
+    "自动安装未开启；可执行 install_env.ps1 / install_env.sh，或加 --install-repo-deps（等价于 P2C_REPO_VENV_AUTO=1）",
+    "情形 A smoke 运行未跑通（运行失败）：ModuleNotFoundError: No module named 'joblib'"
+  ],
+  "report_path": "./reproduce/repro_report.md"
+}

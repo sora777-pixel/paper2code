@@ -1,0 +1,18 @@
+{
+  "id": "fig_f1",
+  "paper_ref": "Figure 1",
+  "caption": "Schematic representation of the SL pipeline, which undergoes three steps. (A) The full training set is used to train 10 different ML",
+  "kind": "diagram",
+  "reproducibility": "not_reproducible",
+  "data_keys": [],
+  "axes": {},
+  "series": [],
+  "chart": null,
+  "layout": "1x1",
+  "style_notes": "",
+  "diagram": null,
+  "mermaid": null,
+  "demo_change_needed": "示意/架构图：离线模式无法还原图中内容；启用 LLM 后可依据图注与方法章节生成方框-箭头示意",
+  "source_note": "",
+  "original_image": "./figures/p03_x268.png"
+}

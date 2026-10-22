@@ -19,8 +19,9 @@ from . import extract
 # --------------------------------------------------------------------------- #
 _FRONTMATTER_RE = re.compile(r"^---\s*$")
 _ATX_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
-_SETEXT_RE = re.compile(r"^(=+|-{2,})\s*$")
-_PAGE_HEADING = re.compile(r"^page\s+\d+$", re.I)
+#: setext 下划线。``=`` 要求 **2 个以上**：PDF 正文里的公式碎片常是单独一行 ``=``
+#: （实测 P2 的 ``… relationship:`` + ``=`` + ``G`` 被误判成一级标题）。
+_SETEXT_RE = re.compile(r"^(={2,}|-{2,})\s*$")
 
 
 def _strip_frontmatter(text: str) -> Tuple[Dict[str, str], str]:
@@ -59,13 +60,21 @@ def markdown_to_blocks(text: str) -> Tuple[str, List[str], List[Tuple[int, str, 
         m = _ATX_RE.match(line)
         if m:
             level = len(m.group(1))
-            headings.append((level, m.group(2), i))
-            if level == 1 and not title and not _PAGE_HEADING.match(m.group(2)):
-                title = m.group(2)
+            heading = m.group(2)
+            # 分页标记绝不能变成章节——否则每个 PDF 页面都会被记成一个语义章节
+            if extract.is_page_marker(heading):
+                i += 1
+                continue
+            headings.append((level, heading, i))
+            if level == 1 and not title:
+                title = heading
             i += 1
             continue
         # setext 式标题
         if i + 1 < len(lines) and _SETEXT_RE.match(lines[i + 1]) and line.strip():
+            if extract.is_page_marker(line):
+                i += 1
+                continue
             level = 1 if lines[i + 1].strip().startswith("=") else 2
             headings.append((level, line.strip(), i))
             if level == 1 and not title:
@@ -111,9 +120,9 @@ def parse_markdown(text: str, paper_id: str, source_path: str = "", kind: str = 
     tables = extract.extract_tables(lines)
     figures = extract.extract_figures(lines)
     algorithms = extract.extract_algorithms(lines)
-    code_refs, data_refs = extract.extract_code_refs(lines)
-    code_stmt = extract.find_code_statement(lines)
     formulas = extract.extract_formulas(lines)
+    code_refs, data_refs = extract.extract_code_refs(lines, title)
+    code_stmt = extract.find_code_statement(lines)
 
     authors = _split_authors(meta.get("authors", ""))
 

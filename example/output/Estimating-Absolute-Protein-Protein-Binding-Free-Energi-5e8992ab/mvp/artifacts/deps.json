@@ -1,0 +1,17 @@
+{
+  "level": "light",
+  "third_party": [
+    "numpy"
+  ],
+  "available": [
+    "numpy"
+  ],
+  "missing": [],
+  "pip_missing": [],
+  "manual_missing": [],
+  "local_modules": [],
+  "declared_clean": [],
+  "install_hint": "",
+  "manual_hint": "",
+  "degrade_to_stdlib": false
+}

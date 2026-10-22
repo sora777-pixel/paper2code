@@ -1,0 +1,26 @@
+# 数据集声明（roadmap M6-③）
+#
+# 用途：把论文复现需要的数据集**显式登记**下来，由 paper2code 在跑之前做「先审后取」：
+#   1. 许可检查：不在白名单（CC-0/CC-BY/MIT/Apache/ODC 等）里的，或**未声明许可**的，默认拒绝下载；
+#   2. 校验和检查：download 后逐字节核对 sha256，不一致立刻删除并记为失败；
+#   3. 一切记账：结果（含失败原因）写进 outputs/single/<id>/data/DATA_SOURCES.json。
+#
+# 用法：取消注释并填好 url / sha256 / license → `python -m paper2code run <论文>` 时会自动获取；
+#       也可以先 dry-run 审查：`python -m paper2code datasets`（只审不下载）。
+#
+# 为什么默认留空：论文里的数据链接通常**既没有许可也没有校验和**，
+# 悄悄下载一个来路不明的大文件，可能拿到损坏/被替换的数据（复现失败其实是数据问题），
+# 也可能踩许可红线。所以这里要求你确认每一项。
+datasets: []
+
+# 示例（把 license 与 sha256 补全后才会被允许下载）：
+# datasets:
+#   - name: imagenet-val
+#     url: https://example.org/imagenet-val.tar
+#     sha256: 0000000000000000000000000000000000000000000000000000000000000000
+#     license: cc-by-4.0
+#     size_bytes: 1073741824
+#     note: 用于 Figure 1 的验证集
+#   - name: internal-logs
+#     url: /mnt/share/trace.csv        # 本地路径 / file:// 也可
+#     license: mit

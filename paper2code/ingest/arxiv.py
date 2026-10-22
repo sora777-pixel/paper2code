@@ -8,11 +8,18 @@ from __future__ import annotations
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import NamedTuple, Optional, Tuple
 
 _ATOM = "{http://www.w3.org/2005/Atom}"
 
 UA = "paper2code/0.1 (local research tool)"
+
+
+class HttpResponse(NamedTuple):
+    body: bytes
+    content_type: str
+    status: int
+    url: str
 
 
 def _get(url: str, timeout: int = 60) -> bytes:
@@ -28,6 +35,40 @@ def _get(url: str, timeout: int = 60) -> bytes:
         req = urllib.request.Request(url, headers={"User-Agent": UA})
         with urllib.request.urlopen(req, timeout=timeout) as fh:  # noqa: S310
             return fh.read()
+
+
+def http_get(url: str, timeout: int = 60, accept: str = "") -> HttpResponse:
+    """通用 GET（跟随跳转），返回正文 / Content-Type / 状态码 / 最终 URL。
+
+    **非 2xx 不抛异常**：调用方需要靠状态码区分「被墙 / 需订阅 / 返回非 PDF」，
+    而不是把一个 403 变成没有上下文的 URLError。连接层失败才会向上抛。
+    """
+    headers = {"User-Agent": UA}
+    if accept:
+        headers["Accept"] = accept
+    try:
+        import requests  # type: ignore
+
+        r = requests.get(url, timeout=timeout, headers=headers, allow_redirects=True)
+        return HttpResponse(r.content, r.headers.get("Content-Type", ""), int(r.status_code), str(r.url))
+    except Exception:
+        pass
+
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as fh:  # noqa: S310
+            return HttpResponse(fh.read(), fh.headers.get("Content-Type", ""),
+                                int(getattr(fh, "status", 200) or 200), fh.geturl())
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read()
+        except Exception:
+            body = b""
+        ctype = exc.headers.get("Content-Type", "") if exc.headers else ""
+        return HttpResponse(body, ctype, int(exc.code), url)
 
 
 def normalize_arxiv_id(raw: str) -> str:

@@ -6,56 +6,33 @@
 
 页面：
 
-* ``/``                    首页：上传 + 「生成解析」+ 论文卡片（查看 / 删除）
-* ``/paper/{paper_id}``    论文详情：课件 / 播客稿 / 复现建议与 demo
-* ``/settings``            API 设置（LLM + TTS，密钥仅内存）
-* ``/view?p=<path>``       Markdown 产物阅读器
-* ``/files/...``           直接访问 ``outputs/`` 下的任意产物
+* ``/``              运行总览 Dashboard
+* ``/view?p=<path>`` Markdown 产物阅读器（复现报告、播客脚本、大纲）
+* ``/files/...``     直接访问 ``outputs/single/`` 下的任意产物（课件 HTML、音频、图表）
 
 接口：
 
 * ``GET  /api/runs``           列出全部运行
 * ``GET  /api/runs/{pid}``     单个运行的 manifest
 * ``POST /api/run``            提交一篇论文（同步执行，MVP 简化处理）
-* ``GET  /api/papers``         列出本地论文（incoming/ + outputs/）
-* ``DELETE /api/papers/{id}``  删除 incoming + outputs 整树（仅网站）
-* ``GET  /api/llm/status``     当前 LLM 状态（不含密钥）
-* ``POST /api/llm/settings``   进程内应用 LLM 设置（不落盘）
-* ``POST /api/llm/test``       发送极短 chat 探测连通性
-* ``POST /api/upload``         上传论文到 incoming/<paper_id>/
-* ``GET  /api/tts/status``     TTS 状态（不含密钥）
-* ``POST /api/tts/test``       短句语音探测（不返回密钥）
-* ``POST /api/tts/settings``   进程内应用 TTS 设置（不落盘）
-* ``POST /api/tts/generate``   为已有播客稿合成语音
 """
 
 from __future__ import annotations
 
 import json
-import re as _re
-import shutil
-import threading
-import time
-from datetime import datetime
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from .config import (
-    apply_llm_runtime,
-    apply_tts_runtime,
-    get_settings,
-    llm_status,
-    tts_status,
-)
-from .pipeline import list_runs, run_paper
+from .config import get_settings
+from .ingest import KIND_LABELS, classify_source, paper_id_for_source
+from .pipeline import list_runs
+from .progress import read_snapshot
+from .taskqueue import PENDING, RUNNING, ensure_workers, get_queue
 
 try:  # FastAPI 为可选依赖：没装也不影响 CLI 使用
-    from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+    from fastapi import FastAPI, HTTPException, Query, Request
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+    from fastapi.responses import HTMLResponse, JSONResponse
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 
@@ -67,624 +44,35 @@ except Exception:  # pragma: no cover
         pass
 
 
-_RUN_LOCK = threading.Lock()
-_RUN_JOBS: Dict[str, Dict[str, Any]] = {}
-
-
-def _job_snapshot(paper_id: str) -> Dict[str, Any]:
-    with _RUN_LOCK:
-        job = dict(_RUN_JOBS.get(paper_id) or {})
-    if job:
-        return job
-    return {"status": "unknown", "paper_id": paper_id}
-
-
-def _spawn_paper_run(source: str, paper_id: str) -> None:
-    """Start run_paper in a daemon thread so the upload form can return immediately."""
-    with _RUN_LOCK:
-        _RUN_JOBS[paper_id] = {"status": "running", "paper_id": paper_id}
-
-    def _bg() -> None:
-        t0 = time.perf_counter()
-        try:
-            manifest = run_paper(
-                source,
-                explain=("courseware", "podcast"),
-                reproduce=True,
-                audio=False,
-            )
-            elapsed = time.perf_counter() - t0
-            print(
-                f"[paper2code] /api/run ok paper_id={manifest.get('paper_id')} "
-                f"elapsed={elapsed:.1f}s backend={(manifest.get('stats') or {})}",
-                flush=True,
-            )
-            with _RUN_LOCK:
-                rec = {
-                    "status": "ok",
-                    "paper_id": manifest.get("paper_id") or paper_id,
-                    "manifest": manifest,
-                }
-                _RUN_JOBS[paper_id] = rec
-                if rec["paper_id"] != paper_id:
-                    _RUN_JOBS[rec["paper_id"]] = rec
-        except Exception as exc:
-            elapsed = time.perf_counter() - t0
-            detail = _scrub_secret(f"{type(exc).__name__}: {exc}")
-            print(f"[paper2code] /api/run fail after {elapsed:.1f}s: {detail}", flush=True)
-            with _RUN_LOCK:
-                _RUN_JOBS[paper_id] = {"status": "error", "paper_id": paper_id, "detail": detail}
-
-    threading.Thread(target=_bg, daemon=True, name=f"p2c-run-{paper_id}").start()
-
-
-def _scrub_secret(text: str, secret: str = "") -> str:
-    """Strip api key from error bodies so responses never echo secrets."""
-    out = str(text or "")
-    if secret and secret in out:
-        out = out.replace(secret, "***")
-    return out
-
-
-def _looks_like_filepath_key(value: str) -> bool:
-    """Guard against pasting config paths (e.g. default.yaml) into the key box."""
-    s = (value or "").strip().strip('"').strip("'")
-    if not s:
-        return False
-    lower = s.lower().replace(chr(92), "/")
-    if lower.endswith((".yaml", ".yml", ".json", ".env", ".toml", ".ini")):
-        return True
-    if "/" in lower:
-        if not (s.startswith("sk-") or s.startswith("sk-or-") or s.startswith("Bearer ")):
-            return True
-    return False
-
-
-def _maybe_apply_llm(
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
-    model: Optional[str] = None,
-    llm_mode: Optional[str] = None,
-    persist: bool = False,
-) -> None:
-    """Apply only non-empty fields; empty string = keep existing key."""
-    key = api_key if (api_key is not None and str(api_key).strip()) else None
-    if key is not None and _looks_like_filepath_key(key):
-        key = None
-    url = base_url if (base_url is not None and str(base_url).strip()) else None
-    mdl = model if (model is not None and str(model).strip()) else None
-    mode = llm_mode if (llm_mode is not None and str(llm_mode).strip()) else None
-    if key is None and url is None and mdl is None and mode is None and not persist:
-        return
-    apply_llm_runtime(api_key=key, base_url=url, model=mdl, mode=mode, persist=persist)
-
-
-def _ping_llm(timeout: float = 20.0) -> Dict[str, Any]:
-    """Send a tiny chat completion using current settings. Never returns the key."""
-    st = get_settings()
-    if st.llm_mode == "offline" or not st.llm_api_key:
-        return {"ok": False, "error": "当前为离线模式或未配置 API Key"}
-    base = (st.llm_base_url or "").rstrip("/")
-    model = st.llm_model or "gpt-4o-mini"
-    key = st.llm_api_key
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 8,
-        "temperature": 0,
+def queue_snapshot(limit: int = 30) -> Dict[str, Any]:
+    """队列视图（roadmap M5-①）：任务列表 + 计数 + 并发上限 + 数据库位置。"""
+    q = get_queue()
+    cfg = get_settings().queue_config()
+    return {
+        "ok": True,
+        "stats": q.stats(),
+        "concurrency": cfg["concurrency"],
+        "timeout_s": cfg["timeout_s"],
+        "db": cfg["db"],
+        "tasks": [t.to_dict() for t in q.list(limit=limit)],
     }
-    req = urllib.request.Request(
-        f"{base}/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {key}",
-        },
-        method="POST",
-    )
-    t0 = time.perf_counter()
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as fh:  # noqa: S310
-            raw = fh.read().decode("utf-8", "ignore")
-        latency_ms = int((time.perf_counter() - t0) * 1000)
-        data = json.loads(raw)
-        preview = ""
-        try:
-            preview = str(data["choices"][0]["message"]["content"] or "")[:120]
-        except (KeyError, IndexError, TypeError):
-            preview = str(data)[:120]
-        preview = _scrub_secret(preview, key)
-        return {"ok": True, "latency_ms": latency_ms, "model": model, "preview": preview}
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", "ignore")[:300]
-        body = _scrub_secret(body, key)
-        return {"ok": False, "error": f"HTTP {exc.code}: {body}"}
-    except Exception as exc:
-        return {"ok": False, "error": _scrub_secret(f"{type(exc).__name__}: {exc}", key)}
 
 
-def _sanitize_paper_id(name: str) -> str:
-    """Derive a filesystem-safe paper_id from a filename or folder name."""
-    from .ingest.loader import sanitize_paper_id
+def confirm_required() -> str:
+    """M4-⑤「首次运行需确认」：返回必须让用户先确认的理由（空串 = 无需确认）。
 
-    return sanitize_paper_id(name)
-
-
-def _upload_suffix(name: str) -> str:
-    suf = Path(name or "").suffix.lower()
-    if suf == ".htm":
-        return ".html"
-    return suf or ".bin"
-
-
-def _safe_upload_name(name: str) -> str:
-    """Keep the real extension; never slice through ``.pdf``."""
-    base = Path(name or "upload.bin").name
-    suffix = Path(base).suffix
-    stem = Path(base).stem if suffix else base
-    stem = _re.sub(r"[^\w.\-\u4e00-\u9fff]+", "_", stem, flags=_re.UNICODE).strip("._")
-    stem = (stem or "upload")[:80]
-    return f"{stem}{suffix}"
-
-
-def _incoming_root() -> Path:
-    root = get_settings().workspace / "incoming"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def _uploads_legacy_root() -> Path:
-    root = _incoming_root() / "uploads"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def _outputs_root() -> Path:
-    root = get_settings().output_dir
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def _validate_paper_id(paper_id: str) -> str:
-    """Reject path traversal / empty ids. Returns cleaned id."""
-    pid = (paper_id or "").strip()
-    if not pid:
-        raise ValueError("paper_id 为空")
-    if "/" in pid or "\\" in pid or ".." in pid or pid in (".",):
-        raise ValueError("非法 paper_id")
-    if _re.search(r"[\x00-\x1f]", pid):
-        raise ValueError("非法 paper_id")
-    if pid.startswith("~") or ":" in pid:
-        raise ValueError("非法 paper_id")
-    return pid
-
-
-def _existing_paper_ids() -> set:
-    ids: set = set()
-    inc = _incoming_root()
-    if inc.exists():
-        for p in inc.iterdir():
-            if p.is_dir() and p.name != "uploads":
-                ids.add(p.name)
-        up = inc / "uploads"
-        if up.is_dir():
-            for p in up.iterdir():
-                if p.is_dir():
-                    ids.add(p.name)
-    out = _outputs_root()
-    if out.exists():
-        for p in out.iterdir():
-            if p.is_dir():
-                ids.add(p.name)
-    return ids
-
-
-def _allocate_paper_id(stem: str) -> str:
-    """Unique paper_id from sanitized stem; append _2, _3 on collision."""
-    base = _sanitize_paper_id(stem)
-    existing = _existing_paper_ids()
-    if base not in existing:
-        return base
-    n = 2
-    while f"{base}_{n}" in existing:
-        n += 1
-    return f"{base}_{n}"
-
-
-def _resolve_incoming_dir(paper_id: str) -> Optional[Path]:
-    """Find incoming/<id> or legacy incoming/uploads/<id>."""
-    pid = _validate_paper_id(paper_id)
-    inc = _incoming_root()
-    cand = (inc / pid).resolve()
-    try:
-        cand.relative_to(inc.resolve())
-    except ValueError:
-        return None
-    if cand.is_dir() and cand != inc.resolve() and cand.name != "uploads":
-        return cand
-    legacy_root = (inc / "uploads").resolve()
-    legacy = (legacy_root / pid).resolve()
-    try:
-        legacy.relative_to(legacy_root)
-    except ValueError:
-        return None
-    if legacy.is_dir():
-        return legacy
-    return None
-
-
-def _resolve_outputs_dir(paper_id: str) -> Optional[Path]:
-    pid = _validate_paper_id(paper_id)
-    out = _outputs_root()
-    cand = (out / pid).resolve()
-    try:
-        cand.relative_to(out.resolve())
-    except ValueError:
-        return None
-    if cand.is_dir() and cand != out.resolve():
-        return cand
-    return None
-
-
-def _primary_paper_file(d: Path) -> str:
-    for cand in ("paper.pdf", "paper.md", "paper.html", "paper.txt"):
-        if (d / cand).exists():
-            return str(d / cand)
-    files = [f for f in d.iterdir() if f.is_file()]
-    if files:
-        return str(files[0])
-    return str(d)
-
-
-def _list_papers() -> List[Dict[str, Any]]:
-    """Merge incoming (+ legacy uploads) and outputs into a paper list."""
-    by_id: Dict[str, Dict[str, Any]] = {}
-
-    def ensure(pid: str) -> Dict[str, Any]:
-        if pid not in by_id:
-            by_id[pid] = {
-                "paper_id": pid,
-                "title": pid,
-                "incoming_dir": None,
-                "outputs_dir": None,
-                "source_path": "",
-                "has_incoming": False,
-                "has_outputs": False,
-                "has_courseware": False,
-                "has_podcast": False,
-                "has_podcast_audio": False,
-                "has_repro": False,
-                "legacy_upload": False,
-                "created_at": "",
-                "artifacts": {},
-                "stats": {},
-                "status": "uploaded",
-            }
-        return by_id[pid]
-
-    inc = _incoming_root()
-    if inc.exists():
-        for p in sorted(inc.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-            if not p.is_dir() or p.name == "uploads":
-                continue
-            item = ensure(p.name)
-            item["incoming_dir"] = str(p)
-            item["has_incoming"] = True
-            item["source_path"] = str(p)
-            item["created_at"] = datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds")
-        up = inc / "uploads"
-        if up.is_dir():
-            for p in sorted(up.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-                if not p.is_dir():
-                    continue
-                item = ensure(p.name)
-                item["incoming_dir"] = str(p)
-                item["has_incoming"] = True
-                item["legacy_upload"] = True
-                item["source_path"] = str(p)
-                item["created_at"] = datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds")
-
-    runs = {r.get("paper_id"): r for r in list_runs() if r.get("paper_id")}
-    out = _outputs_root()
-    if out.exists():
-        for p in out.iterdir():
-            if not p.is_dir():
-                continue
-            item = ensure(p.name)
-            item["outputs_dir"] = str(p)
-            item["has_outputs"] = True
-            man = p / "manifest.json"
-            if man.exists():
-                try:
-                    data = json.loads(man.read_text(encoding="utf-8"))
-                    item["title"] = data.get("title") or item["title"]
-                    item["created_at"] = data.get("created_at") or item["created_at"]
-                    item["artifacts"] = data.get("artifacts") or {}
-                    item["stats"] = data.get("stats") or {}
-                except Exception:
-                    pass
-            elif p.name in runs:
-                r = runs[p.name]
-                item["title"] = r.get("title") or item["title"]
-                item["created_at"] = r.get("created_at") or item["created_at"]
-                item["artifacts"] = r.get("artifacts") or {}
-                item["stats"] = r.get("stats") or {}
-            if not item["created_at"]:
-                item["created_at"] = datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds")
-
-    # Fill has_* flags from artifacts and filesystem
-    for item in by_id.values():
-        a = item.get("artifacts") or {}
-        ex = a.get("explain") or {}
-        rp = a.get("reproduce") or {}
-        out_dir = Path(item["outputs_dir"]) if item.get("outputs_dir") else None
-        has_cw = bool(ex.get("courseware"))
-        has_ps = bool(ex.get("podcast_script"))
-        has_pa = bool(ex.get("podcast_audio"))
-        has_rp = bool(rp.get("report_html") or rp.get("report"))
-        if out_dir and out_dir.is_dir():
-            if (out_dir / "explain" / "courseware.html").exists():
-                has_cw = True
-            if (out_dir / "explain" / "podcast_script.md").exists():
-                has_ps = True
-            if (out_dir / "explain" / "podcast.mp3").exists():
-                has_pa = True
-            if (out_dir / "reproduce" / "repro_report.html").exists() or (
-                out_dir / "reproduce" / "repro_report.md"
-            ).exists():
-                has_rp = True
-        item["has_courseware"] = has_cw
-        item["has_podcast"] = has_ps
-        item["has_podcast_audio"] = has_pa
-        item["has_repro"] = has_rp
-        if item.get("has_outputs") and (has_cw or has_ps or has_rp):
-            item["status"] = "ready"
-        elif item.get("has_outputs"):
-            item["status"] = "outputs"
-        elif item.get("has_incoming"):
-            item["status"] = "uploaded"
-        else:
-            item["status"] = "unknown"
-
-    items = list(by_id.values())
-    items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
-    return items
-
-
-def _delete_paper(paper_id: str) -> Dict[str, Any]:
-    """Recursively remove incoming + outputs trees for paper_id. Path-traversal safe."""
-    pid = _validate_paper_id(paper_id)
-    removed: List[str] = []
-    missing: List[str] = []
-
-    inc_dir = _resolve_incoming_dir(pid)
-    out_dir = _resolve_outputs_dir(pid)
-
-    if inc_dir is None and out_dir is None:
-        raise FileNotFoundError(f"未找到论文：{pid}")
-
-    if inc_dir is not None:
-        shutil.rmtree(inc_dir)
-        removed.append(str(inc_dir))
-    else:
-        missing.append("incoming")
-
-    if out_dir is not None:
-        shutil.rmtree(out_dir)
-        removed.append(str(out_dir))
-    else:
-        missing.append("outputs")
-
-    index_path = _outputs_root() / "index.json"
-    if index_path.exists():
-        try:
-            data = json.loads(index_path.read_text(encoding="utf-8")) or []
-            data = [d for d in data if d.get("paper_id") != pid]
-            index_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
-
-    return {"ok": True, "paper_id": pid, "removed": removed, "missing": missing}
-
-
-def _normalize_run_source(source: str) -> str:
-    """If source is paper.* under incoming/, use parent bundle dir so paper_id = folder stem."""
-    try:
-        p = Path(source)
-        if not p.exists():
-            return source
-        if p.is_file() and p.name.lower() in (
-            "paper.pdf", "paper.md", "paper.html", "paper.htm", "paper.txt", "paper.markdown",
-        ):
-            parent = p.parent.resolve()
-            inc = _incoming_root().resolve()
-            try:
-                parent.relative_to(inc)
-                return str(parent)
-            except ValueError:
-                pass
-    except Exception:
-        pass
-    return source
-
-
-def _list_recent_uploads(limit: int = 12) -> list:
-    """Recent incoming paper folders (new stem dirs + legacy uploads)."""
-    items = []
-    for it in _list_papers():
-        if not it.get("has_incoming"):
-            continue
-        d = Path(it["incoming_dir"])
-        files = [f.name for f in d.iterdir() if f.is_file()] if d.is_dir() else []
-        items.append({
-            "dir": it["incoming_dir"],
-            "name": it["paper_id"],
-            "paper_id": it["paper_id"],
-            "files": files,
-            "path": it["source_path"] or _primary_paper_file(d),
-            "legacy_upload": it.get("legacy_upload", False),
-        })
-        if len(items) >= limit:
-            break
-    return items
-
-
-def _parse_script_turns(script_text: str) -> list:
-    turns = []
-    for ln in (script_text or "").splitlines():
-        s = ln.strip()
-        if not s or s.startswith("#"):
-            continue
-        m = _re.match(r"^\*\*【(主持人|讲解人)】\*\*\s*(.*)$", s)
-        if not m:
-            m = _re.match(r"^【(主持人|讲解人)】\s*(.*)$", s)
-        if m:
-            spk = "A" if m.group(1) == "主持人" else "B"
-            turns.append({"speaker": spk, "text": m.group(2).strip()})
-    return turns
-
-
-def _maybe_apply_tts(
-    api_key=None,
-    base_url=None,
-    model=None,
-    provider=None,
-    voice=None,
-    persist: bool = False,
-):
-    key = api_key if (api_key is not None and str(api_key).strip()) else None
-    if key is not None and _looks_like_filepath_key(key):
-        key = None
-    url = base_url if (base_url is not None and str(base_url).strip()) else None
-    mdl = model if (model is not None and str(model).strip()) else None
-    prov = provider if (provider is not None and str(provider).strip()) else None
-    voi = voice if (voice is not None and str(voice).strip()) else None
-    if key is None and url is None and mdl is None and prov is None and voi is None and not persist:
-        return
-    apply_tts_runtime(api_key=key, base_url=url, model=mdl, provider=prov, voice=voi, persist=persist)
-
-
-
-def _resolve_run_source(source: str, paper_id: Optional[str] = None) -> str:
-    """Prefer incoming/<paper_id> when given; survive path mojibake on Windows.
-
-    Browser JSON is UTF-8-safe, but some clients (PowerShell, mis-encoded tools)
-    corrupt CJK path strings. Resolving by validated paper_id avoids FileNotFound.
+    放在模块级（而不是 FastAPI 块内）是为了**不装 fastapi 也能测**这条安全语义。
     """
-    # 1) explicit paper_id
-    if paper_id:
-        try:
-            pid = _validate_paper_id(paper_id)
-            found = _resolve_incoming_dir(pid)
-            if found is not None:
-                return str(found)
-        except ValueError:
-            pass
+    from .reproduce import runner
 
-    # 2) normalize paper.* file -> parent bundle
-    source = _normalize_run_source(source or "")
-    try:
-        p = Path(source)
-        if p.exists():
-            return str(p.resolve() if p.is_dir() else p)
-    except Exception:
-        pass
-
-    # 3) last path component as paper_id (may still be correct unicode)
-    try:
-        tail = Path(source).name if source else ""
-        if tail:
-            pid = _validate_paper_id(tail)
-            found = _resolve_incoming_dir(pid)
-            if found is not None:
-                return str(found)
-    except Exception:
-        pass
-
-    return source
-
-
-def _ping_tts(timeout: float = 30.0) -> Dict[str, Any]:
-    """Tiny /v1/audio/speech probe. Never returns the API key."""
-    st = get_settings()
-    provider = (getattr(st, "tts_provider", None) or st.tts_mode or "auto").lower()
-    key = getattr(st, "tts_api_key", "") or ""
-    base = (getattr(st, "tts_base_url", "") or "https://api.siliconflow.cn/v1").rstrip("/")
-    model = getattr(st, "tts_model", "") or "FunAudioLLM/CosyVoice2-0.5B"
-    voice = getattr(st, "tts_voice", "") or f"{model}:alex"
-
-    if provider in ("edge",) or (not key and provider in ("auto", "edge", "")):
-        # Try edge-tts ping without cloud key
-        try:
-            import edge_tts  # type: ignore
-            import asyncio
-
-            async def _edge_ping() -> None:
-                comm = edge_tts.Communicate("测试", voice=st.tts_voice_a or "zh-CN-XiaoxiaoNeural")
-                # drain a few chunks then cancel — connectivity check
-                n = 0
-                async for _chunk in comm.stream():
-                    n += 1
-                    if n >= 2:
-                        break
-
-            t0 = time.perf_counter()
-            try:
-                asyncio.run(_edge_ping())
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                try:
-                    loop.run_until_complete(_edge_ping())
-                finally:
-                    loop.close()
-            latency_ms = int((time.perf_counter() - t0) * 1000)
-            return {"ok": True, "latency_ms": latency_ms, "model": "edge-tts", "mode": "edge"}
-        except Exception as exc:
-            if not key:
-                return {"ok": False, "error": "未配置 TTS API Key；edge-tts 探测也失败：" + _scrub_secret(str(exc)), "mode": "edge"}
-            # fall through to cloud if key present
-
-    if not key:
-        return {"ok": False, "error": "请填写 TTS API Key（或改用 edge-tts 预设）", "mode": provider or "siliconflow"}
-
-    payload = {
-        "model": model,
-        "input": "测试",
-        "voice": voice,
-        "response_format": "mp3",
-    }
-    req = urllib.request.Request(
-        f"{base}/audio/speech",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {key}",
-        },
-        method="POST",
-    )
-    t0 = time.perf_counter()
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as fh:  # noqa: S310
-            audio = fh.read(64)  # discard rest; enough to confirm success
-            # drain remaining to free connection
-            try:
-                fh.read()
-            except Exception:
-                pass
-        latency_ms = int((time.perf_counter() - t0) * 1000)
-        return {
-            "ok": True,
-            "latency_ms": latency_ms,
-            "model": model,
-            "mode": provider or "siliconflow",
-            "bytes_preview": len(audio),
-        }
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", "ignore")[:300]
-        body = _scrub_secret(body, key)
-        return {"ok": False, "error": f"HTTP {exc.code}: {body}", "model": model, "mode": provider or "siliconflow"}
-    except Exception as exc:
-        return {"ok": False, "error": _scrub_secret(f"{type(exc).__name__}: {exc}", key), "model": model, "mode": provider or "siliconflow"}
+    if not get_settings().sandbox_require_confirm:
+        return ""
+    pol = runner.resolve_policy()
+    if pol.mode == "container":
+        return ""
+    return ("执行沙箱为「%s」（%s，风险：%s）。运行生成的论文代码 = 在本机执行任意代码，"
+            "请先确认；或把 sandbox_mode 设为 container 使用容器隔离。"
+            % (pol.mode, pol.isolation, "高" if pol.risk == "high" else "低"))
 
 
 if _HAS_FASTAPI:
@@ -697,27 +85,31 @@ if _HAS_FASTAPI:
     )
 
     class RunRequest(BaseModel):
-        source: str = ""
-        paper_id: Optional[str] = None
+        source: str
         explain: str = "courseware,podcast"
         reproduce: bool = True
-        audio: bool = False
-        api_key: Optional[str] = None
-        base_url: Optional[str] = None
-        model: Optional[str] = None
-        llm_mode: Optional[str] = None
-        wait: bool = True
+        audio: bool = True
+        resume: bool = False   # M1-⑤：跳过上次已完成且产物仍在的阶段
+        confirm: bool = False  # M4-⑤：非容器模式下的「首次运行需确认」
 
-    class LlmSettingsRequest(BaseModel):
-        api_key: Optional[str] = None
-        base_url: Optional[str] = None
-        model: Optional[str] = None
-        llm_mode: Optional[str] = None
-        persist: bool = True
+    def _confirm_gate(confirm: bool) -> None:
+        """「首次运行需确认」（roadmap M4-⑤）：本地模式意味着生成的代码真的会在本机执行。"""
+        reason = confirm_required()
+        if reason and not confirm:
+            raise HTTPException(status_code=409, detail=reason)
 
     @app.get("/api/runs")
     def api_runs() -> List[Dict[str, Any]]:
         return list_runs()
+
+    @app.get("/api/sandbox")
+    def api_sandbox() -> Dict[str, Any]:
+        """当前执行沙箱策略 + 风险提示（供页面横幅渲染）。"""
+        from .reproduce import runner
+
+        pol = runner.resolve_policy()
+        return {"ok": True, "policy": pol.to_dict(), "notice": runner.sandbox_notice(),
+                "require_confirm": get_settings().sandbox_require_confirm}
 
     @app.get("/api/runs/{pid}")
     def api_run(pid: str) -> Dict[str, Any]:
@@ -726,308 +118,227 @@ if _HAS_FASTAPI:
                 return r
         raise HTTPException(status_code=404, detail=f"未找到运行记录：{pid}")
 
+    def _source_for(paper_id: str) -> str:
+        """论文输入的定位（run 记录 → incoming → tests/inputs/single）。"""
+        rec = next((r for r in list_runs() if r.get("paper_id") == paper_id), None)
+        source = (rec or {}).get("source") or ""
+        if not Path(source).exists():
+            for base in (get_settings().workspace / "incoming", get_settings().single_input_dir):
+                cand = base / paper_id
+                if cand.exists():
+                    source = str(cand)
+                    break
+        if not source or not Path(source).exists():
+            raise HTTPException(status_code=404, detail=f"找不到论文输入：{paper_id}")
+        return source
+
+    # -- MVP 自动生成（图表绘制说明 + demo 代码） ---------------------------- #
+    @app.post("/api/mvp/{paper_id}")
+    def api_mvp_start(paper_id: str, confirm: bool = False, execute: bool = True) -> Dict[str, Any]:
+        """把「重新生成 MVP」作为一个队列任务提交（M5-①：有并发上限、可取消、重启不丢）。"""
+        _confirm_gate(confirm)
+        source = _source_for(paper_id)
+        q = get_queue()
+        if any(t.kind == "mvp" and t.status in (PENDING, RUNNING)
+               for t in q.list(limit=50) if t.label == paper_id):
+            return {"ok": True, "accepted": False, "status": "running", "paper_id": paper_id}
+        tid = q.enqueue("mvp", source, {"execute": execute}, label=paper_id)
+        ensure_workers()
+        return {"ok": True, "accepted": True, "task_id": tid, "status": PENDING, "paper_id": paper_id}
+
+    class ModifyRequest(BaseModel):
+        instruction: str
+        confirm: bool = False
+
+    @app.post("/api/mvp/{paper_id}/modify")
+    def api_mvp_modify(paper_id: str, req: ModifyRequest) -> Dict[str, Any]:
+        """「改一次」（M5-②）：提交一条修改指令；上一版会被存档，并生成版本间 diff。"""
+        _confirm_gate(req.confirm)
+        instruction = (req.instruction or "").strip()
+        if not instruction:
+            raise HTTPException(status_code=400, detail="instruction 不能为空")
+        source = _source_for(paper_id)
+        tid = get_queue().enqueue("mvp", source, {"modify": instruction}, label=paper_id)
+        ensure_workers()
+        return {"ok": True, "accepted": True, "task_id": tid, "status": PENDING,
+                "paper_id": paper_id, "instruction": instruction}
+
+    @app.get("/api/mvp/{paper_id}/versions")
+    def api_mvp_versions(paper_id: str) -> Dict[str, Any]:
+        """版本清单（M5-②）：当前版本 + 历史版本 + 各版 diff 路径。"""
+        from .mvp import iterate
+
+        out = get_settings().output_dir / paper_id / "mvp"
+        return {"ok": True, "paper_id": paper_id, "versions": iterate.summarize(out)}
+
+    @app.get("/api/mvp/{paper_id}/status")
+    def api_mvp_status(paper_id: str) -> Dict[str, Any]:
+        tasks = [t for t in get_queue().list(limit=50) if t.kind == "mvp" and t.label == paper_id]
+        if not tasks:
+            return {"status": "idle", "paper_id": paper_id}
+        t = tasks[0]
+        return {"status": t.status, "paper_id": paper_id, "task_id": t.id,
+                "error": t.error, "result": t.result}
+
     @app.post("/api/run")
     def api_run_post(req: RunRequest) -> Dict[str, Any]:
-        _maybe_apply_llm(req.api_key, req.base_url, req.model, req.llm_mode, persist=bool(req.api_key))
+        """把一篇论文作为队列任务提交，立刻返回 task_id（M5-①：队列 + 并发上限 + 可取消）。"""
+        _confirm_gate(req.confirm)
+        pid = paper_id_for_source(req.source)     # 与 loader 完全同一套规则（arXiv/DOI/URL 才不会对不上）
         explain = tuple(k.strip() for k in req.explain.split(",") if k.strip())
-        source = _resolve_run_source(req.source or "", getattr(req, "paper_id", None))
-        if not source:
-            raise HTTPException(status_code=400, detail="缺少 source / paper_id")
-        if not Path(source).exists():
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"找不到输入：{source}"
-                    + (f"（paper_id={req.paper_id}）" if req.paper_id else "")
-                    + "。请确认已上传，或改用 paper_id 字段。"
-                ),
-            )
-        paper_id = (req.paper_id or "").strip() or Path(source).name
-        secret = req.api_key or ""
+        tid = get_queue().enqueue("paper", req.source,
+                                  {"explain": explain, "reproduce": req.reproduce,
+                                   "audio": req.audio, "resume": req.resume}, label=pid)
+        ensure_workers()
+        return {"ok": True, "accepted": True, "task_id": tid, "status": PENDING, "paper_id": pid}
 
-        def _execute() -> Dict[str, Any]:
-            with _RUN_LOCK:
-                _RUN_JOBS[paper_id] = {"status": "running", "paper_id": paper_id}
-            t0 = time.perf_counter()
-            try:
-                manifest = run_paper(source, explain=explain, reproduce=req.reproduce, audio=req.audio)
-                elapsed = time.perf_counter() - t0
-                print(
-                    f"[paper2code] /api/run ok paper_id={manifest.get('paper_id')} "
-                    f"elapsed={elapsed:.1f}s backend={(manifest.get('stats') or {})}",
-                    flush=True,
-                )
-                with _RUN_LOCK:
-                    _RUN_JOBS[paper_id] = {
-                        "status": "ok",
-                        "paper_id": manifest.get("paper_id") or paper_id,
-                        "manifest": manifest,
-                    }
-                    if manifest.get("paper_id") and manifest["paper_id"] != paper_id:
-                        _RUN_JOBS[manifest["paper_id"]] = _RUN_JOBS[paper_id]
-                return manifest
-            except Exception as exc:
-                elapsed = time.perf_counter() - t0
-                detail = _scrub_secret(f"{type(exc).__name__}: {exc}", secret)
-                print(f"[paper2code] /api/run fail after {elapsed:.1f}s: {detail}", flush=True)
-                with _RUN_LOCK:
-                    _RUN_JOBS[paper_id] = {"status": "error", "paper_id": paper_id, "detail": detail}
-                raise
+    class BatchRequest(BaseModel):
+        sources: List[str]
+        explain: str = "courseware,podcast"
+        reproduce: bool = True
+        audio: bool = True
+        resume: bool = False
+        confirm: bool = False
 
-        if req.wait is False:
-            def _bg() -> None:
-                try:
-                    _execute()
-                except Exception:
-                    pass
+    @app.post("/api/batch")
+    def api_batch_post(req: BatchRequest) -> Dict[str, Any]:
+        """批量提交（M5-① 的批处理视图）：一次入队多篇，排队执行、可逐个取消。"""
+        _confirm_gate(req.confirm)
+        if not req.sources:
+            raise HTTPException(status_code=400, detail="sources 不能为空")
+        explain = tuple(k.strip() for k in req.explain.split(",") if k.strip())
+        q = get_queue()
+        ids: List[Dict[str, Any]] = []
+        for src in req.sources:
+            src = (src or "").strip()
+            if not src:
+                continue
+            tid = q.enqueue("paper", src, {"explain": explain, "reproduce": req.reproduce,
+                                           "audio": req.audio, "resume": req.resume},
+                            label=paper_id_for_source(src))
+            ids.append({"task_id": tid, "source": src})
+        if ids:
+            ensure_workers()
+        return {"ok": True, "accepted": True, "n": len(ids), "tasks": ids}
 
-            threading.Thread(target=_bg, daemon=True, name=f"p2c-run-{paper_id}").start()
-            return {"ok": True, "accepted": True, "status": "running", "paper_id": paper_id, "source": source}
+    # -- 来源识别 / 文件上传 / 删除历史（M5 后的 UI 整理） ------------------- #
+    @app.get("/api/classify")
+    def api_classify(source: str = Query(..., description="待识别的来源串")) -> Dict[str, Any]:
+        """识别输入形态：arXiv / DOI / 直链 PDF / 网页 / 本机路径 / 论文包目录。
 
-        try:
-            return _execute()
-        except HTTPException:
-            raise
-        except Exception as exc:
-            detail = _scrub_secret(f"{type(exc).__name__}: {exc}", secret)
-            raise HTTPException(status_code=400, detail=detail) from exc
-
-    @app.get("/api/jobs/{paper_id}")
-    def api_job(paper_id: str) -> Dict[str, Any]:
-        try:
-            pid = _validate_paper_id(paper_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _job_snapshot(pid)
-
-    @app.get("/api/papers")
-    def api_papers() -> List[Dict[str, Any]]:
-        return _list_papers()
-
-    @app.get("/api/papers/{paper_id}")
-    def api_paper_one(paper_id: str) -> Dict[str, Any]:
-        try:
-            pid = _validate_paper_id(paper_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        for it in _list_papers():
-            if it.get("paper_id") == pid:
-                return it
-        raise HTTPException(status_code=404, detail=f"未找到论文：{pid}")
-
-    @app.delete("/api/papers/{paper_id}")
-    def api_papers_delete(paper_id: str) -> Dict[str, Any]:
-        try:
-            return _delete_paper(paper_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
-
-    @app.post("/api/papers/{paper_id}/delete")
-    def api_papers_delete_post(paper_id: str) -> Dict[str, Any]:
-        return api_papers_delete(paper_id)
-
-    @app.get("/api/llm/status")
-    def api_llm_status() -> Dict[str, Any]:
-        return llm_status()
-
-    @app.post("/api/llm/settings")
-    def api_llm_settings(req: LlmSettingsRequest) -> Dict[str, Any]:
-        _maybe_apply_llm(req.api_key, req.base_url, req.model, req.llm_mode, persist=bool(req.persist))
-        st = llm_status()
-        return {"ok": True, **st}
-
-    @app.post("/api/llm/test")
-    def api_llm_test(req: LlmSettingsRequest) -> Dict[str, Any]:
-        # Apply in-memory first; persist only after a successful ping so a typo
-        # does not overwrite the saved key. Empty key = reuse configs/api_keys.yaml.
-        _maybe_apply_llm(req.api_key, req.base_url, req.model, req.llm_mode, persist=False)
-        result = _ping_llm(timeout=20.0)
-        if result.get("ok") and (req.persist is not False):
-            _maybe_apply_llm(req.api_key, req.base_url, req.model, req.llm_mode, persist=True)
-            result.update(llm_status())
-        return result
-
-    class TtsSettingsRequest(BaseModel):
-        api_key: Optional[str] = None
-        base_url: Optional[str] = None
-        model: Optional[str] = None
-        provider: Optional[str] = None
-        voice: Optional[str] = None
-        persist: bool = True
-
-    class TtsGenerateRequest(BaseModel):
-        paper_id: str
-        api_key: Optional[str] = None
-        base_url: Optional[str] = None
-        model: Optional[str] = None
-        provider: Optional[str] = None
-        voice: Optional[str] = None
+        前端用它显示「识别为：xxx」，并保证 /api/run 与产物目录用的是同一个 paper_id。
+        """
+        kind = classify_source(source)
+        out: Dict[str, Any] = {"ok": True, "source": source, "kind": kind,
+                               "kind_label": KIND_LABELS.get(kind, kind)}
+        if kind != "empty":
+            out["paper_id"] = paper_id_for_source(source)
+        if kind == "doi":
+            out["notice"] = "DOI 会先试 doi.org 内容协商取 PDF；被出版商订阅墙挡住时会明确报错。"
+        elif kind == "arxiv":
+            out["notice"] = "arXiv 优先抓 HTML 全文，退回 PDF。"
+        elif kind == "path_missing":
+            out["notice"] = "本机没有这个路径；要上传文件请用「选择文件 / 拖拽」。"
+        return out
 
     @app.post("/api/upload")
-    async def api_upload(file: UploadFile = File(...)):
-        """Save uploaded paper under incoming/<paper_id>/paper.* (stem-named folder)."""
-        raw_name = Path(file.filename or "paper.pdf").name
-        suffix = _upload_suffix(raw_name)
-        paper_id = _allocate_paper_id(raw_name)
-        dest_dir = _incoming_root() / paper_id
-        # path-traversal safe: paper_id has no separators
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        if suffix in (".pdf", ".md", ".html", ".txt"):
-            dest_name = f"paper{suffix}"
-        elif suffix == ".zip":
-            dest_name = "bundle.zip"
-        else:
-            dest_name = _safe_upload_name(raw_name)
-        dest = dest_dir / dest_name
-        dest = dest_dir / dest_name
+    async def api_upload(request: Request, filename: str = Query(..., description="原始文件名"),
+                         confirm: bool = False, resume: bool = False) -> Dict[str, Any]:
+        """上传文件（PDF / md / html / txt / zip）→ 落盘 ``incoming/<paper_id>/`` → 入队。
+
+        走**裸 body**（``await request.body()``）而非 multipart：这样不引入
+        ``python-multipart`` 依赖，离线环境零新增安装。
+        """
+        from .ingest import save_upload
+
+        _confirm_gate(confirm)
+        data = await request.body()
+        if not data:
+            raise HTTPException(status_code=400, detail="上传内容为空")
         try:
-            with dest.open("wb") as fh:
-                while True:
-                    chunk = await file.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    fh.write(chunk)
-            if suffix == ".zip":
-                import zipfile
-                with zipfile.ZipFile(dest, "r") as zf:
-                    zf.extractall(dest_dir)
-                for cand in ("paper.pdf", "paper.md", "paper.html"):
-                    if (dest_dir / cand).exists():
-                        dest = dest_dir / cand
-                        break
-        except Exception as exc:
-            # cleanup empty/partial dir on failure
-            try:
-                if dest_dir.exists() and not any(dest_dir.iterdir()):
-                    dest_dir.rmdir()
-            except Exception:
-                pass
-            raise HTTPException(status_code=400, detail=f"上传失败：{type(exc).__name__}: {exc}") from exc
-        return {
-            "ok": True,
-            "paper_id": paper_id,
-            "path": str(dest_dir),  # bundle dir → run uses folder stem as paper_id
-            "file": str(dest),
-            "dir": str(dest_dir),
-            "name": paper_id,
-            "recent": _list_recent_uploads(),
-        }
-
-    @app.get("/api/uploads")
-    def api_uploads_list():
-        return _list_recent_uploads()
-
-    @app.get("/api/tts/status")
-    def api_tts_status():
-        return tts_status()
-
-    @app.post("/api/tts/settings")
-    def api_tts_settings(req: TtsSettingsRequest):
-        _maybe_apply_tts(req.api_key, req.base_url, req.model, req.provider, req.voice, persist=bool(req.persist))
-        return {"ok": True, **tts_status()}
-
-    @app.post("/api/tts/test")
-    def api_tts_test(req: TtsSettingsRequest) -> Dict[str, Any]:
-        """Probe TTS with a tiny speech request. Never returns the API key."""
-        _maybe_apply_tts(req.api_key, req.base_url, req.model, req.provider, req.voice, persist=False)
-        result = _ping_tts(timeout=30.0)
-        if result.get("ok") and (req.persist is not False):
-            _maybe_apply_tts(req.api_key, req.base_url, req.model, req.provider, req.voice, persist=True)
-            result.update(tts_status())
-        return result
-
-    @app.post("/api/tts/generate")
-    def api_tts_generate(req: TtsGenerateRequest):
-        """Synthesize podcast audio for an existing run; save under outputs/<pid>/explain/."""
-        _maybe_apply_tts(req.api_key, req.base_url, req.model, req.provider, req.voice, persist=bool(req.api_key))
-        try:
-            pid = _validate_paper_id(req.paper_id)
+            pid, dest = save_upload(filename, data, get_settings().workspace / "incoming")
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        st = get_settings()
-        explain = st.output_dir / pid / "explain"
-        script = explain / "podcast_script.md"
-        if not script.exists():
-            raise HTTPException(status_code=404, detail=f"未找到播客稿：{pid}/explain/podcast_script.md")
-        turns = _parse_script_turns(script.read_text(encoding="utf-8"))
-        if len(turns) < 2:
-            raise HTTPException(status_code=400, detail="播客稿无法解析为对白轮次")
-        from .tts import get_tts
+        except OSError as exc:
+            # 写盘失败（典型：Windows MAX_PATH 越界）是可解释的输入/环境问题，
+            # 必须回到 400 并说明原因，不能变成只有「HTTP 500」的空白报错。
+            raise HTTPException(status_code=400, detail="写入上传文件失败：%s" % exc) from exc
+        tid = get_queue().enqueue("paper", str(dest),
+                                  {"explain": ("courseware", "podcast"), "reproduce": True,
+                                   "audio": True, "resume": resume}, label=pid)
+        ensure_workers()
+        return {"ok": True, "accepted": True, "task_id": tid, "status": PENDING,
+                "paper_id": pid, "saved": str(dest), "bytes": len(data)}
 
-        engine = get_tts(refresh=True)
-        out_audio = explain / "podcast.mp3"
-        path = engine.synthesize(turns, out_audio)
-        status = tts_status()
-        if not path:
-            err = "; ".join(engine.warnings) or "语音合成失败"
-            return JSONResponse(
-                status_code=400,
-                content={"ok": False, "error": err, "engine": engine.name, **status},
-            )
-        rel = f"{pid}/explain/{Path(path).name}"
-        return {
-            "ok": True,
-            "engine": engine.name,
-            "audio": rel,
-            "url": f"/files/{rel}",
-            "warnings": engine.warnings,
-            **status,
-        }
+    @app.delete("/api/runs/{pid}")
+    def api_delete_run(pid: str) -> Dict[str, Any]:
+        """删除一次运行：产物目录 + index 记录 + 队列任务 + 上传原件。"""
+        from .pipeline import delete_run
 
-    @app.post("/go", response_class=HTMLResponse)
-    async def go_upload_and_run(file: UploadFile = File(...)):
-        """No-JS fallback: native form POST uploads the PDF and starts parsing."""
-        saved = await api_upload(file)
-        paper_id = str(saved.get("paper_id") or "")
-        source = str(saved.get("path") or "")
-        if paper_id and source:
-            _spawn_paper_run(source, paper_id)
-        pid_js = json.dumps(paper_id)
-        href = "/paper/" + urllib.parse.quote(paper_id, safe="")
-        shown = paper_id.replace("<", "").replace(">", "")
-        return (
-            "<!DOCTYPE html><html lang='zh-CN'><head><meta charset='utf-8'/>"
-            "<title>正在解析…</title>"
-            "<style>body{font:16px/1.6 -apple-system,'Microsoft YaHei',sans-serif;"
-            "max-width:640px;margin:60px auto;padding:0 20px;color:#1b2130}"
-            "a{color:#4f6bed}</style></head><body>"
-            "<h1>正在生成解析</h1>"
-            "<p id='msg'>已上传 " + shown
-            + "，正在生成课件 / 播客 / 复现（大约 1 分钟）…</p>"
-            "<p><a href='" + href + "'>打开详情页</a> · <a href='/'>返回首页</a></p>"
-            "<script>const PID=" + pid_js + ";"
-            "async function poll(){"
-            "try{const j=await(await fetch('/api/jobs/'+encodeURIComponent(PID))).json();"
-            "if(j.status==='ok'){location.href='/paper/'+encodeURIComponent(PID);return;}"
-            "if(j.status==='error'){document.getElementById('msg').textContent='失败：'+(j.detail||'');return;}"
-            "}catch(e){}"
-            "setTimeout(poll,1000);}poll();</script>"
-            "</body></html>"
-        )
+        res = delete_run(pid)
+        if not res.get("ok"):
+            raise HTTPException(status_code=400, detail=res.get("reason") or "删除失败")
+        return res
+
+    @app.get("/api/tasks")
+    def api_tasks(limit: int = 30) -> Dict[str, Any]:
+        return queue_snapshot(limit=limit)
+
+    @app.get("/api/tasks/{task_id}")
+    def api_task(task_id: str) -> Dict[str, Any]:
+        """单个任务：状态 + 阶段进度（运行中直接读 progress.json，不经过数据库）。"""
+        t = get_queue().get(task_id)
+        if t is None:
+            raise HTTPException(status_code=404, detail=f"未找到任务：{task_id}")
+        snap = None
+        if t.status == RUNNING:
+            snap = read_snapshot(get_settings().output_dir / str(t.label) / "progress.json")
+        return {"ok": True, "task": t.to_dict(), "progress": snap or t.progress}
+
+    @app.post("/api/tasks/{task_id}/cancel")
+    def api_task_cancel(task_id: str) -> Dict[str, Any]:
+        r = get_queue().request_cancel(task_id)
+        if not r.get("ok"):
+            raise HTTPException(status_code=409, detail=r.get("reason") or "无法取消")
+        return {"ok": True, **r}
+
+    @app.get("/api/run/{paper_id}/progress")
+    def api_run_progress(paper_id: str) -> Dict[str, Any]:
+        """阶段进度：`progress.json` 快照 + 该论文最近一个队列任务的状态。"""
+        tasks = [t for t in get_queue().list(limit=50) if t.label == paper_id and t.kind == "paper"]
+        job = ({"status": "idle"} if not tasks else
+               {"status": tasks[0].status, "task_id": tasks[0].id, "detail": tasks[0].error})
+        snap = read_snapshot(get_settings().output_dir / paper_id / "progress.json")
+        return {"ok": True, "paper_id": paper_id, "job": job, "progress": snap,
+                "tasks": [t.to_dict() for t in tasks[:5]]}
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard() -> str:
         return _DASHBOARD_HTML
 
-    @app.get("/paper/{paper_id}", response_class=HTMLResponse)
-    def paper_detail(paper_id: str) -> str:
-        return _PAPER_DETAIL_HTML
-
-    @app.get("/view/paper", response_class=HTMLResponse)
-    def paper_detail_qs(id: str = Query("", description="paper_id")) -> str:
-        return _PAPER_DETAIL_HTML
-
-    @app.get("/settings", response_class=HTMLResponse)
-    def settings_page() -> str:
-        return _SETTINGS_HTML
-
     @app.get("/view", response_class=HTMLResponse)
     def view(p: str = Query(..., description="outputs 下的相对路径")) -> str:
         return _VIEWER_HTML
+
+    @app.on_event("startup")
+    def _on_startup() -> None:
+        """M5-①/④：启动时收尾孤儿任务、裁掉陈旧记录、拉起 worker 池、加载插件。
+
+        服务重启后排队任务不会「没人跑」；上一次进程死掉时还停在 ``running`` 的任务会被
+        如实记为失败（原因写明是重启中断，而不是让它永远转圈）；插件导入失败只记 warning。
+        """
+        try:
+            get_queue().reclaim_orphans()
+            get_queue().prune(keep=200)
+            ensure_workers()
+        except Exception:
+            pass
+        try:
+            from . import plugins
+
+            plugins.ensure_loaded()
+        except Exception:
+            pass
 
     settings = get_settings().ensure_dirs()
     app.mount("/files", StaticFiles(directory=str(settings.output_dir), html=True), name="files")
@@ -1046,719 +357,444 @@ body{background:radial-gradient(1000px 560px at 8% -10%,#e8edff,transparent 60%)
 radial-gradient(860px 480px at 104% 0%,#eafaf7,transparent 55%),var(--bg);
 color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
 min-height:100vh;padding:34px 22px 70px}
-.wrap{max-width:980px;margin:0 auto}
+.wrap{max-width:1180px;margin:0 auto}
 header{margin-bottom:26px}
 h1{font-size:31px;font-weight:800;letter-spacing:-.02em}
 h1 span{background:linear-gradient(120deg,var(--brand),var(--brand2),var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
 .sub{color:var(--muted);margin-top:8px;font-size:14.5px}
-.nav{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
-.nav a{font-size:13.5px;text-decoration:none;color:var(--muted);border:1px solid var(--line);
-padding:7px 14px;border-radius:999px;background:#fff;font-weight:650;transition:.14s}
-.nav a:hover,.nav a.active{background:var(--brand);color:#fff;border-color:var(--brand)}
-.panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin:18px 0 8px;
-box-shadow:0 6px 18px rgba(24,39,75,.05)}
-.panel .title{font-size:14px;font-weight:700;color:#39457a}
-.panel .hint{font-size:12.5px;color:var(--muted);margin-top:4px}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
-input[type=file]{padding:12px 15px;border:1px solid var(--line);border-radius:12px;font-size:14.5px;background:#fff;flex:1;min-width:220px}
-button{padding:12px 22px;border:none;border-radius:12px;background:linear-gradient(135deg,var(--brand),var(--brand2));
-color:#fff;font-size:14.5px;font-weight:650;cursor:pointer;transition:.16s}
-button:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(79,107,237,.3)}
-button:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}
-button.danger{background:#fff;color:var(--fail);border:1px solid #f5c2c2;box-shadow:none}
-button.danger:hover{background:#fef2f2;box-shadow:0 4px 12px rgba(220,38,38,.12)}
-.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));margin-top:8px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px 22px;
-box-shadow:0 8px 26px rgba(24,39,75,.07);transition:.18s;position:relative;overflow:hidden;display:flex;flex-direction:column;gap:10px}
-.card:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(24,39,75,.13)}
-.card::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;
-background:linear-gradient(90deg,var(--brand),var(--brand2),var(--accent))}
-.card h3{font-size:17px;font-weight:750;line-height:1.4;word-break:break-all}
-.meta{color:var(--muted);font-size:12.5px}
-.badge{display:inline-block;font-size:12px;padding:3px 10px;border-radius:999px;background:#eef2ff;color:#3d4ea8;font-weight:650}
-.badge.ready{background:#e8f8ee;color:#15803d}
-.badge.uploaded{background:#f1f3f9;color:#5d6b85}
-.actions{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
-.actions a,.actions button{font-size:13px;text-decoration:none;padding:7px 14px;border-radius:9px;font-weight:650}
-.actions a.view{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;border:none}
-.actions a.view:hover{opacity:.92}
-.empty{text-align:center;padding:64px 20px;color:var(--muted);background:#fff;border:1px dashed var(--line);border-radius:18px;grid-column:1/-1}
-#toast{margin-top:12px;font-size:13.8px;color:var(--muted);min-height:1.4em}
-#runStatus{font-size:13.5px;color:var(--muted);margin-top:10px;min-height:1.4em;font-weight:650}
-#runStatus.busy{color:var(--brand)}
-#runStatus.ok{color:var(--pass)}
-#runStatus.err{color:var(--fail)}
-#runError{display:none;margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid #fecaca;
-background:#fef2f2;color:var(--fail);font-size:13.5px;font-weight:650;white-space:pre-wrap;word-break:break-word}
-#runError.show{display:block}
-#toast.err{color:var(--fail);font-weight:650}
-</style></head>
-<body><div class="wrap">
-<header>
-  <h1>paper2code · <span>论文学习工具</span></h1>
-  <div class="sub">选择 PDF 后点「上传并生成解析」。已保存的 API Key 会自动使用，不必每次再填。</div>
-  <div class="nav">
-    <a class="active" href="/">首页</a>
-    <a href="/settings">设置</a>
-  </div>
-</header>
-
-<div class="panel">
-  <div class="title">上传并生成解析</div>
-  <div class="hint">点按钮会弹出选文件窗口；选好 PDF 后自动上传并生成课件 / 播客 / 复现（大约 1 分钟）。</div>
-  <div id="keyChip" class="hint" style="margin-top:8px"></div>
-  <form id="goForm" action="/go" method="post" enctype="multipart/form-data">
-  <div class="row">
-    <input type="file" name="file" id="file" required accept=".pdf,.md,.html,.htm,.zip,application/pdf,application/zip"/>
-    <button type="submit" id="doRun">上传并生成解析</button>
-  </div>
-  </form>
-  <div id="runStatus"></div>
-  <div id="runError" role="alert"></div>
-</div>
-<div id="toast"></div>
-
-<h2 style="font-size:17px;font-weight:750;margin:22px 0 12px;color:#39457a">本地论文</h2>
-<div class="grid" id="grid"></div>
-</div>
-<script>
-const grid=document.getElementById('grid'),toast=document.getElementById('toast');
-const fileInput=document.getElementById('file'),doRun=document.getElementById('doRun');
-const runStatus=document.getElementById('runStatus');
-
-(async()=>{
-  const chip=document.getElementById('keyChip');
-  if(!chip) return;
-  try{
-    const s=await (await fetch('/api/llm/status')).json();
-    if(s.has_key){
-      chip.textContent='LLM Key 已就绪'+(s.key_hint?'（'+s.key_hint+'）':'')+' · 来自 '+(s.key_source_label||'本机')+' · 直接上传即可，无需再填';
-    }else{
-      chip.innerHTML='尚未保存 LLM Key，将用离线模式。只需在<a href="/settings">设置</a>里填一次并保存。';
-    }
-  }catch(e){}
-})();
-
-function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function setStatus(msg, cls){runStatus.textContent=msg||'';runStatus.className=cls||'';}
-function setRunError(msg){
-  const el=document.getElementById('runError');
-  if(!el){toast.textContent=msg||'';toast.className=msg?'err':'';return;}
-  if(msg){el.textContent=msg;el.classList.add('show');toast.textContent=msg;toast.className='err';}
-  else{el.textContent='';el.classList.remove('show');toast.className='';}
-}
-function errDetail(d){
-  if(!d) return '';
-  if(typeof d.detail==='string') return d.detail;
-  if(Array.isArray(d.detail)) return d.detail.map(x=>x.msg||JSON.stringify(x)).join('; ');
-  return d.error||d.message||JSON.stringify(d);
-}
-
-const STATUS_LABEL={ready:'已解析',uploaded:'已上传',outputs:'有产物',unknown:'未知'};
-
-async function load(){
-  const papers=await (await fetch('/api/papers')).json();
-  if(!papers.length){
-    grid.innerHTML='<div class="empty">还没有本地论文。<br>请选择文件后点「上传并生成解析」。</div>';
-    return;
-  }
-  grid.innerHTML=papers.map(r=>{
-    const pid=r.paper_id;
-    const st=r.status|| (r.has_outputs?'ready':'uploaded');
-    const label=STATUS_LABEL[st]||st;
-    const badgeCls=st==='ready'?'ready':'uploaded';
-    return '<div class="card">'
-      +'<h3>'+esc(r.title||pid)+'</h3>'
-      +'<div class="meta">'+esc(pid)+(r.created_at?' · '+esc(r.created_at):'')+'</div>'
-      +'<div><span class="badge '+badgeCls+'">'+esc(label)+'</span></div>'
-      +'<div class="actions">'
-      +'<a class="view" href="/paper/'+encodeURIComponent(pid)+'">查看</a>'
-      +'<button type="button" class="danger" data-del="'+esc(pid)+'">删除</button>'
-      +'</div></div>';
-  }).join('');
-  grid.querySelectorAll('button[data-del]').forEach(btn=>{
-    btn.onclick=async()=>{
-      const pid=btn.getAttribute('data-del');
-      if(!confirm('确认删除论文「'+pid+'」？\\n将同时删除 incoming 与 outputs 下该论文的全部文件，且不可恢复。'))return;
-      btn.disabled=true;
-      try{
-        const r=await fetch('/api/papers/'+encodeURIComponent(pid),{method:'DELETE'});
-        const d=await r.json().catch(()=>({}));
-        toast.textContent=r.ok?('已删除：'+pid):('失败：'+(d.detail||JSON.stringify(d)));
-        if(r.ok) await load();
-      }catch(e){toast.textContent='删除失败：'+e}
-      btn.disabled=false;
-    };
-  });
-}
-
-doRun.onclick=null;
-const goForm=document.getElementById('goForm');
-if(goForm){
-  goForm.addEventListener('submit',function(ev){
-    if(!fileInput.files||!fileInput.files[0]){
-      return;
-    }
-    ev.preventDefault();
-    startPipeline();
-  });
-}
-fileInput.addEventListener('change',()=>{
-  if(fileInput.files&&fileInput.files[0]) startPipeline();
-});
-
-async function startPipeline(){
-  if(!fileInput.files||!fileInput.files[0]){setStatus('请先选择文件','err');setRunError('请先选择 PDF（或点按钮弹出选择窗口）');return}
-  if(doRun.disabled) return;
-  doRun.disabled=true;
-  const fname=fileInput.files[0].name||'file';
-  setStatus('正在上传 '+fname+' …','busy');
-  setRunError('');
-  toast.textContent='';
-  let paperId='';
-  const t0=Date.now();
-  const tick=setInterval(()=>{
-    const s=Math.round((Date.now()-t0)/1000);
-    if(paperId) setStatus('解析中… '+paperId+' · 已用 '+s+' 秒（调用模型时大约 1 分钟）','busy');
-  },1000);
-  try{
-    const fd=new FormData(); fd.append('file', fileInput.files[0]);
-    const ur=await fetch('/api/upload',{method:'POST',body:fd});
-    const ud=await ur.json().catch(()=>({}));
-    if(!ur.ok||!ud.path){
-      const msg='上传失败：'+errDetail(ud);
-      setStatus(msg,'err'); setRunError(msg);
-      return;
-    }
-    paperId=ud.paper_id||'';
-    const source=ud.path||ud.dir||ud.file;
-    if(!source){
-      const msg='上传响应缺少 path';
-      setStatus(msg,'err'); setRunError(msg);
-      return;
-    }
-    setStatus('已上传 '+paperId+'，正在生成解析…','busy');
-    toast.textContent='已上传：'+paperId+'，正在生成解析…';
-    try{ await load(); }catch(_e){}
-    const body={source:source,paper_id:paperId||undefined,explain:'courseware,podcast',reproduce:true,audio:false,wait:false};
-    const rr=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(body)});
-    const rd=await rr.json().catch(()=>({}));
-    if(!rr.ok){
-      const msg='解析失败：'+errDetail(rd);
-      setStatus(msg,'err'); setRunError(msg);
-      try{ await load(); }catch(_e){}
-      return;
-    }
-    const doneId=rd.paper_id||paperId;
-    let lastErr='';
-    for(let i=0;i<180;i++){
-      await new Promise(r=>setTimeout(r,1000));
-      try{
-        const jr=await fetch('/api/jobs/'+encodeURIComponent(doneId));
-        const jd=await jr.json().catch(()=>({}));
-        if(jd.status==='error'){
-          const msg='解析失败：'+(jd.detail||errDetail(jd));
-          setStatus(msg,'err'); setRunError(msg);
-          try{ await load(); }catch(_e){}
-          return;
-        }
-        if(jd.status==='ok'){
-          setStatus('完成','ok'); setRunError('');
-          toast.textContent='完成：'+doneId+' — 正在打开详情…';
-          try{ await load(); }catch(_e){}
-          location.href='/paper/'+encodeURIComponent(doneId);
-          return;
-        }
-      }catch(e){ lastErr=String(e); }
-      try{
-        const pr=await fetch('/api/papers/'+encodeURIComponent(doneId));
-        const pd=await pr.json().catch(()=>({}));
-        if(pr.ok && (pd.has_courseware||pd.has_podcast||pd.has_repro)){
-          setStatus('完成','ok'); setRunError('');
-          try{ await load(); }catch(_e){}
-          location.href='/paper/'+encodeURIComponent(doneId);
-          return;
-        }
-      }catch(e){ lastErr=String(e); }
-    }
-    const msg='解析超时（3 分钟仍无课件）。'+lastErr+' 请打开论文卡片查看是否已生成。';
-    setStatus(msg,'err'); setRunError(msg);
-    try{ await load(); }catch(_e){}
-  }catch(e){
-    const msg='请求失败：'+e;
-    setStatus(msg,'err'); setRunError(msg);
-    try{ await load(); }catch(_e){}
-  }finally{
-    clearInterval(tick);
-    doRun.disabled=false;
-  }
-}
-load();
-</script></body></html>
-"""
-
-
-
-_PAPER_DETAIL_HTML = """<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>论文详情 · paper2code</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#f5f7fb;--card:#fff;--ink:#1b2130;--muted:#5d6b85;--line:#e3e8f2;
---brand:#4f6bed;--brand2:#8b5cf6;--accent:#0ea5a4;--pass:#16a34a;--fail:#dc2626;}
-body{background:radial-gradient(1000px 560px at 8% -10%,#e8edff,transparent 60%),
-radial-gradient(860px 480px at 104% 0%,#eafaf7,transparent 55%),var(--bg);
-color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
-min-height:100vh;padding:34px 22px 70px}
-.wrap{max-width:860px;margin:0 auto}
-.nav{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
-.nav a{font-size:13.5px;text-decoration:none;color:var(--muted);border:1px solid var(--line);
-padding:7px 14px;border-radius:999px;background:#fff;font-weight:650}
-.nav a:hover{background:var(--brand);color:#fff;border-color:var(--brand)}
-h1{font-size:26px;font-weight:800;letter-spacing:-.02em;word-break:break-all}
-.sub{color:var(--muted);margin:8px 0 22px;font-size:13.5px}
-.sec{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin-bottom:14px;
-box-shadow:0 6px 18px rgba(24,39,75,.05)}
-.sec h2{font-size:16px;font-weight:750;color:#39457a;margin-bottom:10px}
-.miss{color:#9aa3b5;font-size:13.5px}
-.links{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.links a,button.tts{font-size:13px;text-decoration:none;color:var(--brand);border:1px solid #dfe4f3;
-padding:7px 13px;border-radius:9px;background:#fbfcff;font-weight:650;cursor:pointer}
-.links a:hover,button.tts:hover{background:var(--brand);color:#fff;border-color:var(--brand)}
-button.tts{font-family:inherit}
-audio{width:100%;margin-top:10px}
-#ttsMsg{font-size:13px;color:var(--muted);margin-top:8px}
-.empty{padding:40px;text-align:center;color:var(--muted);background:#fff;border:1px dashed var(--line);border-radius:16px}
-</style></head>
-<body><div class="wrap">
-<div class="nav">
-  <a href="/">← 返回首页</a>
-  <a href="/settings">设置</a>
-</div>
-<h1 id="title">加载中…</h1>
-<div class="sub" id="meta"></div>
-<div id="body"></div>
-</div>
-<script>
-function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function pidFromPath(){
-  const parts=location.pathname.split('/').filter(Boolean);
-  if(parts[0]==='paper' && parts[1]) return decodeURIComponent(parts[1]);
-  return new URLSearchParams(location.search).get('id')||'';
-}
-const PID=pidFromPath();
-function miss(t){return '<div class="miss">'+(window._p2cWait?'正在生成解析，请稍候（约 1 分钟）':'尚未生成')+(t?' · '+esc(t):'')+'</div>'}
-
-async function load(){
-  if(!PID){document.getElementById('title').textContent='缺少 paper_id';return}
-  let r,d;
-  try{
-    r=await fetch('/api/papers/'+encodeURIComponent(PID));
-    d=await r.json();
-  }catch(e){
-    document.getElementById('title').textContent='加载失败';
-    document.getElementById('body').innerHTML='<div class="empty">'+esc(String(e))+'</div>';
-    return;
-  }
-  if(!r.ok){
-    document.getElementById('title').textContent='未找到';
-    document.getElementById('body').innerHTML='<div class="empty">'+esc(d.detail||PID)+'</div>';
-    return;
-  }
-  document.title=(d.title||PID)+' · paper2code';
-  document.getElementById('title').textContent=d.title||PID;
-  document.getElementById('meta').textContent=PID+(d.created_at?' · '+d.created_at:'')+(d.status?' · '+d.status:'');
-
-  const a=d.artifacts||{},ex=a.explain||{},rp=a.reproduce||{};
-  const hasCw=!!(d.has_courseware||ex.courseware);
-  const hasPs=!!(d.has_podcast||ex.podcast_script);
-  const hasPa=!!(d.has_podcast_audio||ex.podcast_audio);
-  const hasRp=!!(d.has_repro||rp.report_html||rp.report);
-
-  let html='';
-  html+='<div class="sec"><h2>课件</h2>';
-  if(hasCw){
-    html+='<div class="links"><a href="/files/'+encodeURIComponent(PID)+'/explain/courseware.html" target="_blank">打开课件 HTML</a></div>';
-  }else html+=miss('courseware.html');
-  html+='</div>';
-
-  html+='<div class="sec"><h2>博客 / 播客稿</h2>';
-  if(hasPs){
-    html+='<div class="links">'
-      +'<a href="/view?p='+encodeURIComponent(PID+'/explain/podcast_script.md')+'" target="_blank">查看播客稿</a>'
-      +'<button type="button" class="tts" id="ttsGo">生成语音</button>'
-      +'</div>';
-    html+='<div id="ttsMsg"></div>';
-    html+='<audio id="ttsAudio" controls style="'+(hasPa?'':'display:none')+'"'
-      +(hasPa?' src="/files/'+encodeURIComponent(PID)+'/explain/podcast.mp3"':'')+'></audio>';
-  }else html+=miss('podcast_script.md');
-  html+='</div>';
-
-  html+='<div class="sec"><h2>复现建议 / 复现 demo</h2>';
-  if(hasRp){
-    html+='<div class="links">';
-    html+='<a href="/files/'+encodeURIComponent(PID)+'/reproduce/repro_report.html" target="_blank">复现报告 HTML</a>';
-    html+='<a href="/view?p='+encodeURIComponent(PID+'/reproduce/repro_report.md')+'" target="_blank">复现报告 Markdown</a>';
-    html+='<a href="/files/'+encodeURIComponent(PID)+'/reproduce/" target="_blank">打开 reproduce/ 目录</a>';
-    html+='</div>';
-  }else html+=miss('repro_report');
-  html+='</div>';
-
-  html+='<div class="sec"><h2>其他产物</h2><div class="links">';
-  if(d.has_outputs){
-    html+='<a href="/view?p='+encodeURIComponent(PID+'/manifest.json')+'" target="_blank">manifest.json</a>';
-    html+='<a href="/files/'+encodeURIComponent(PID)+'/" target="_blank">打开 outputs/'+esc(PID)+'/</a>';
-  }else{
-    html+=miss('outputs');
-  }
-  html+='</div></div>';
-
-  document.getElementById('body').innerHTML=html;
-
-  // If artifacts not ready yet (user opened detail while /api/run still running),
-  // poll until ready so the page does not stay stuck on 尚未生成.
-  if(!hasCw && !hasPs && !hasRp && (d.status==='uploaded' || !d.has_outputs)){
-    window._p2cWait=true;
-    setTimeout(load, 2000);
-  }else{
-    window._p2cWait=false;
-  }
-
-  const go=document.getElementById('ttsGo');
-  if(go){
-    const msg=document.getElementById('ttsMsg');
-    const audio=document.getElementById('ttsAudio');
-    if(hasPa){msg.textContent='已有音频，可直接播放或重新生成。'}
-    go.onclick=async()=>{
-      go.disabled=true; msg.textContent='合成中…（需在设置页配置 TTS Key，或依赖 edge-tts）';
-      try{
-        const body={paper_id:PID, provider:'siliconflow', base_url:'https://api.siliconflow.cn/v1', model:'FunAudioLLM/CosyVoice2-0.5B'};
-        const rr=await fetch('/api/tts/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        const dd=await rr.json();
-        if(dd.ok&&dd.url){
-          audio.src=dd.url+'?t='+Date.now(); audio.style.display='block'; audio.play().catch(()=>{});
-          msg.textContent='完成 · 引擎 '+(dd.engine||'');
-        }else{
-          msg.textContent='失败：'+(dd.error||dd.detail||JSON.stringify(dd));
-        }
-      }catch(e){msg.textContent='请求失败：'+e}
-      go.disabled=false;
-    };
-  }
-}
-load();
-</script></body></html>
-"""
-
-
-_SETTINGS_HTML = """<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>设置 · paper2code</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#f5f7fb;--card:#fff;--ink:#1b2130;--muted:#5d6b85;--line:#e3e8f2;
---brand:#4f6bed;--brand2:#8b5cf6;--accent:#0ea5a4;--pass:#16a34a;--warn:#d97706;--fail:#dc2626;}
-body{background:radial-gradient(1000px 560px at 8% -10%,#e8edff,transparent 60%),
-radial-gradient(860px 480px at 104% 0%,#eafaf7,transparent 55%),var(--bg);
-color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
-min-height:100vh;padding:34px 22px 70px}
-.wrap{max-width:760px;margin:0 auto}
-header{margin-bottom:26px}
-h1{font-size:31px;font-weight:800;letter-spacing:-.02em}
-h1 span{background:linear-gradient(120deg,var(--brand),var(--brand2),var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
-.sub{color:var(--muted);margin-top:8px;font-size:14.5px}
-.nav{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
-.nav a{font-size:13.5px;text-decoration:none;color:var(--muted);border:1px solid var(--line);
-padding:7px 14px;border-radius:999px;background:#fff;font-weight:650;transition:.14s}
-.nav a:hover,.nav a.active{background:var(--brand);color:#fff;border-color:var(--brand)}
-input[type=text],input[type=password],select{width:100%;padding:12px 15px;border:1px solid var(--line);border-radius:12px;font-size:14.5px;background:#fff}
-input[type=text]:focus,input[type=password]:focus,select:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(79,107,237,.12)}
+.submit{display:flex;gap:10px;margin:22px 0 30px;flex-wrap:wrap}
+input[type=text]{flex:1;min-width:280px;padding:12px 15px;border:1px solid var(--line);border-radius:12px;font-size:14.5px;background:#fff}
+input[type=text]:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(79,107,237,.12)}
 button{padding:12px 22px;border:none;border-radius:12px;background:linear-gradient(135deg,var(--brand),var(--brand2));
 color:#fff;font-size:14.5px;font-weight:650;cursor:pointer;transition:.16s}
 button:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(79,107,237,.3)}
 button:disabled{opacity:.6;cursor:not-allowed;transform:none}
-button.secondary{background:#fff;color:var(--brand);border:1px solid #dfe4f3;box-shadow:none}
-button.secondary:hover{background:#f5f7ff;box-shadow:0 4px 12px rgba(79,107,237,.12)}
-.llm-panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;margin:18px 0 8px;
+.grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px 24px;
+box-shadow:0 8px 26px rgba(24,39,75,.07);transition:.18s;position:relative;overflow:hidden}
+.card:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(24,39,75,.13)}
+.card::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;
+background:linear-gradient(90deg,var(--brand),var(--brand2),var(--accent))}
+.card h3{font-size:18px;font-weight:750;line-height:1.4;margin-bottom:6px}
+.meta{color:var(--muted);font-size:13px;margin-bottom:14px}
+.tags{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:15px}
+.tag{font-size:12px;padding:4px 11px;border-radius:999px;background:#eef2ff;color:#3d4ea8;font-weight:650}
+.tag.pass{background:#e8f8ee;color:#15803d}.tag.warn{background:#fef4e2;color:#b45309}
+.tag.fail{background:#fdeaea;color:#b91c1c}.tag.gray{background:#f1f3f9;color:#5d6b85}
+.links{display:flex;gap:9px;flex-wrap:wrap;margin-top:4px}
+.links a{font-size:13px;text-decoration:none;color:var(--brand);border:1px solid #dfe4f3;
+padding:6px 12px;border-radius:9px;background:#fbfcff;font-weight:600;transition:.14s}
+.links a:hover{background:var(--brand);color:#fff;border-color:var(--brand)}
+.empty{text-align:center;padding:76px 20px;color:var(--muted);background:#fff;border:1px dashed var(--line);border-radius:18px}
+.empty code{background:#f1f3f9;padding:3px 8px;border-radius:7px;font-size:13.5px;color:#39457a}
+#toast{margin-top:14px;font-size:13.8px;color:var(--muted)}
+#prog{margin:0 0 22px}
+.chk{display:flex;align-items:center;gap:6px;font-size:13.5px;color:var(--muted);white-space:nowrap}
+.stage{font-size:13.5px;padding:6px 12px;border-radius:9px;background:#f8faff;
+border:1px solid var(--line);margin-bottom:6px}
+.err{color:var(--fail)}
+.banner{margin:0 0 18px;padding:13px 18px;border-radius:14px;font-size:13.6px;line-height:1.65;border:1px solid}
+.banner.ok{background:#eef7ff;border-color:#cfe4ff;color:#1d4f8a}
+.banner.risk{background:#fff7e8;border-color:#ffe0b0;color:#9a5b00}
+.panel{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin:0 0 20px;
 box-shadow:0 6px 18px rgba(24,39,75,.05)}
-.llm-panel .title{font-size:14px;font-weight:700;color:#39457a}
-.llm-panel .hint{font-size:12.5px;color:var(--muted);margin-top:4px;margin-bottom:14px}
-.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;align-items:start}
-@media (max-width:640px){.form-grid{grid-template-columns:1fr}}
-.llm-panel label{font-size:12.5px;color:var(--muted);font-weight:650;display:block;margin-bottom:6px}
-.llm-panel .field{min-width:0;width:100%}
-.actions-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:flex-start;margin-top:16px}
-#llmStatus,#ttsStatus{font-size:13.5px;min-height:1.4em}
-#llmStatus.ok,#ttsStatus.ok{color:var(--pass);font-weight:650}
-#llmStatus.err,#ttsStatus.err{color:var(--fail);font-weight:650}
-#llmStatus.muted,#ttsStatus.muted{color:var(--muted)}
+.panel h4{font-size:15px;font-weight:750;margin-bottom:10px}
+.qrow{display:flex;align-items:center;gap:10px;font-size:13.4px;padding:7px 0;border-top:1px solid #f1f3f9;flex-wrap:wrap}
+.qrow:first-of-type{border-top:none}
+.qstat{font-size:11.5px;padding:3px 9px;border-radius:999px;font-weight:700;background:#eef2ff;color:#3d4ea8}
+.qstat.pending{background:#f1f3f9;color:#5d6b85}.qstat.running{background:#e8f1ff;color:#1d4f8a}
+.qstat.done{background:#e8f8ee;color:#15803d}.qstat.failed{background:#fdeaea;color:#b91c1c}
+.qstat.cancelled{background:#fef4e2;color:#b45309}
+.qbtn{font-size:12px;padding:4px 10px;border-radius:8px;border:1px solid #dfe4f3;background:#fbfcff;
+color:#3d4ea8;cursor:pointer;font-weight:600}
+.qbtn:hover{background:#eef2ff}
+textarea{width:100%;min-height:64px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;
+font:13.5px/1.6 ui-monospace,Menlo,Consolas,monospace;resize:vertical}
+.tabs{display:flex;gap:8px;margin:4px 0 22px;flex-wrap:wrap}
+.tabs button{background:#fff;color:var(--muted);border:1px solid var(--line);border-radius:12px;
+padding:10px 18px;font-size:14.5px;font-weight:650;cursor:pointer;transition:.16s}
+.tabs button:hover{background:#f7f9ff;transform:none;box-shadow:none}
+.tabs button.on{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;border-color:transparent}
+.drop{border:2px dashed var(--line);border-radius:14px;padding:20px;text-align:center;color:var(--muted);
+background:#fbfcff;margin:12px 0 6px;font-size:13.8px;cursor:pointer;transition:.16s}
+.drop:hover,.drop.hot{border-color:var(--brand);background:#eef2ff;color:#3d4ea8}
+.hint{font-size:13px;color:var(--muted);margin-top:8px;line-height:1.7}
+.hint b{color:#3d4ea8}
+.hint code{background:#f1f3f9;padding:2px 6px;border-radius:6px;font-size:12.5px}
+.ghost{background:#fff!important;color:#3d4ea8!important;border:1px solid #dfe4f3!important}
+.danger{color:#b91c1c!important;border-color:#f3d7d7!important;background:#fff!important}
 </style></head>
 <body><div class="wrap">
 <header>
-  <h1>paper2code · <span>设置</span></h1>
-  <div class="sub">Key 只需填一次，会写入本机 <code>configs/api_keys.yaml</code>（不入库）。之后上传解析会自动使用，输入框留空即表示沿用已保存的 Key。</div>
-  <div class="nav">
-    <a href="/">首页</a>
-    <a class="active" href="/settings">设置</a>
-  </div>
+  <h1>paper2code · <span>论文学习工具</span></h1>
+  <div class="sub">提交论文 → 自动生成讲解材料（课件 / 知识播客）与复现结果（表格与图表重现）。支持链接 / 本机路径 / 上传文件，支持单篇与批量。</div>
 </header>
-
-<div class="llm-panel">
-  <div class="title">LLM 设置</div>
-  <div class="hint">保存后写入 configs/api_keys.yaml。已有 Key 时输入框留空即可，不必重复粘贴。</div>
-  <div class="form-grid">
-    <div class="field narrow">
-      <label for="llmPreset">预设</label>
-      <select id="llmPreset">
-        <option value="offline">离线 offline</option>
-        <option value="deepseek">DeepSeek</option>
-        <option value="openrouter">OpenRouter</option>
-        <option value="siliconflow">SiliconFlow 硅基流动</option>
-        <option value="custom">自定义 OpenAI 兼容</option>
-      </select>
-    </div>
-    <div class="field" id="keyField">
-      <label for="llmKey">API Key</label>
-      <input type="password" id="llmKey" placeholder="已保存则留空；仅在更换 Key 时粘贴" autocomplete="off"/>
-    </div>
-    <div class="field" id="urlField">
-      <label for="llmUrl">Base URL</label>
-      <input type="text" id="llmUrl" placeholder="https://api.deepseek.com/v1"/>
-    </div>
-    <div class="field narrow" id="modelField">
-      <label for="llmModel">模型</label>
-      <input type="text" id="llmModel" placeholder="deepseek-chat"/>
-    </div>
-  </div>
-  <div class="actions-row">
-    <button type="button" class="secondary" id="llmTest">测试连接</button>
-    <button type="button" class="secondary" id="llmApply">保存到本机</button>
-    <span id="llmStatus" class="muted"></span>
-  </div>
+<div id="banner"></div>
+<div class="tabs">
+  <button data-tab="single" class="on">① 单篇提交</button>
+  <button data-tab="batch">② 批量提交</button>
+  <button data-tab="history">③ 历史记录</button>
 </div>
 
-<div class="llm-panel">
-  <div class="title">TTS 语音</div>
-  <div class="hint">同样保存到 configs/api_keys.yaml。无 Key 时可用 edge-tts。已保存则留空。</div>
-  <div class="form-grid">
-    <div class="field narrow">
-      <label for="ttsPreset">预设</label>
-      <select id="ttsPreset">
-        <option value="siliconflow">SiliconFlow CosyVoice</option>
-        <option value="openai_speech">自定义 OpenAI 兼容 speech</option>
-        <option value="edge">edge-tts（离线兜底）</option>
-      </select>
+<section id="tab-single">
+  <div class="panel">
+    <h4>提交一篇文章</h4>
+    <div class="meta">三种输入方式任选其一：① 直接填链接 / 本机路径；② 拖拽文件到下面的框；③ 点击框选择文件。</div>
+    <div class="submit" style="margin:14px 0 4px">
+      <input type="text" id="src" placeholder="https://doi.org/10.1021/acs.jcim.4c01641 · 1706.03762 · samples/01_open_source"/>
+      <button id="go">生成</button>
     </div>
-    <div class="field">
-      <label for="ttsKey">TTS API Key</label>
-      <input type="password" id="ttsKey" placeholder="已保存则留空；仅在更换 Key 时粘贴" autocomplete="off"/>
+    <div class="hint" id="cls"></div>
+    <div class="drop" id="drop">把 PDF / md / html / txt / zip 拖到这里，或 <b>点击选择文件</b>
+      <input type="file" id="file" accept=".pdf,.md,.markdown,.html,.htm,.txt,.tex,.zip" style="display:none"/>
     </div>
-    <div class="field">
-      <label for="ttsUrl">TTS Base URL</label>
-      <input type="text" id="ttsUrl" placeholder="https://api.siliconflow.cn/v1"/>
+    <div class="submit" style="margin:4px 0 0">
+      <label class="chk"><input type="checkbox" id="resume"/> 续跑（跳过上次已完成的阶段）</label>
+      <label class="chk" id="confirmWrap"><input type="checkbox" id="confirm"/> 我确认在本机运行生成的代码</label>
     </div>
-    <div class="field narrow">
-      <label for="ttsModel">TTS 模型</label>
-      <input type="text" id="ttsModel" placeholder="FunAudioLLM/CosyVoice2-0.5B"/>
-    </div>
+    <div class="hint" id="confwarn" style="display:none;color:#b91c1c"></div>
+    <div id="toast"></div>
+    <div id="prog"></div>
   </div>
-  <div class="actions-row">
-    <button type="button" class="secondary" id="ttsTest">测试连接</button>
-    <button type="button" class="secondary" id="ttsApply">保存到本机</button>
-    <span id="ttsStatus" class="muted" style="font-size:13px"></span>
+</section>
+
+<section id="tab-batch" hidden>
+  <div class="panel">
+    <h4>批量提交</h4>
+    <div class="meta">每行一条来源（链接 / 本机路径 / arXiv 编号）；也可以载入一个 txt 列表文件，或一次选多个文件上传。</div>
+    <textarea id="batch" style="min-height:130px" placeholder="https://doi.org/10.1021/acs.jcim.4c01641&#10;1706.03762&#10;samples/01_open_source"></textarea>
+    <div class="submit" style="margin:10px 0 0">
+      <button id="batchgo">提交列表</button>
+      <button id="txtbtn" class="ghost">载入 txt 列表</button>
+      <button id="pdfbtn" class="ghost">选择多个文件上传</button>
+      <label class="chk"><input type="checkbox" id="bresume"/> 续跑</label>
+      <label class="chk" id="bconfirmWrap"><input type="checkbox" id="bconfirm"/> 我确认在本机运行生成的代码</label>
+    </div>
+    <div class="hint" id="bconfwarn" style="display:none;color:#b91c1c"></div>
+    <input type="file" id="txtfile" accept=".txt,.csv,.list,.md" style="display:none"/>
+    <input type="file" id="pdfs" multiple accept=".pdf,.md,.markdown,.html,.htm,.txt,.tex,.zip" style="display:none"/>
+    <div id="btoast" class="hint"></div>
   </div>
-</div>
+</section>
+
+<section id="tab-history" hidden>
+  <div class="panel" id="queue"></div>
+  <div id="htoast" class="hint" style="margin-bottom:14px"></div>
+  <div id="hprog"></div>
+  <div class="grid" id="grid"></div>
+</section>
 </div>
 <script>
-const preset=document.getElementById('llmPreset'),llmKey=document.getElementById('llmKey');
-const llmUrl=document.getElementById('llmUrl'),llmModel=document.getElementById('llmModel');
-const llmTest=document.getElementById('llmTest'),llmApply=document.getElementById('llmApply'),llmStatus=document.getElementById('llmStatus');
-const ttsPreset=document.getElementById('ttsPreset'),ttsKey=document.getElementById('ttsKey');
-const ttsUrl=document.getElementById('ttsUrl'),ttsModel=document.getElementById('ttsModel');
-const ttsApply=document.getElementById('ttsApply'),ttsTest=document.getElementById('ttsTest'),ttsStatusEl=document.getElementById('ttsStatus');
+const grid=document.getElementById('grid'),toast=document.getElementById('toast'),go=document.getElementById('go');
+function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function tag(t,c){return '<span class="tag '+(c||'')+'">'+esc(t)+'</span>'}
+function base(p){return String(p||'').split(/[\\\\/]/).pop()}
+function figrel(p){const s=String(p||'').replace(/\\\\/g,'/'),i=s.indexOf('/reproduce/');return i>=0?s.slice(i+11):base(s)}
+async function load(){
+  const runs=await (await fetch('/api/runs')).json();
+  if(!runs.length){grid.innerHTML='<div class="empty" style="grid-column:1/-1">还没有生成任何结果。<br><br>先用命令行跑一篇：<code>python -m paper2code run samples/01_open_source</code><br><br>或直接在上方输入框提交。</div>';return}
+  grid.innerHTML=runs.map(r=>{
+    const a=r.artifacts||{},ex=a.explain,rp=a.reproduce,st=r.stats||{};
+    const ck=(rp&&rp.checks)||{};
+    const pid=r.paper_id;
+    let links='';
+    if(ex&&ex.courseware)links+='<a href="/files/'+pid+'/explain/courseware.html" target="_blank">📊 课件</a>';
+    if(ex&&ex.podcast_audio)links+='<a href="/files/'+pid+'/explain/'+esc(base(ex.podcast_audio))+'" target="_blank">🎧 播客音频</a>';
+    if(ex&&ex.podcast_script)links+='<a href="/view?p='+encodeURIComponent(pid+'/explain/podcast_script.md')+'" target="_blank">📝 播客稿</a>';
+    if(rp&&rp.report_html)links+='<a href="/files/'+pid+'/reproduce/repro_report.html" target="_blank">🔬 复现报告</a>';
+    else if(rp&&rp.report)links+='<a href="/view?p='+encodeURIComponent(pid+'/reproduce/repro_report.md')+'" target="_blank">🔬 复现报告</a>';
+    if(rp&&rp.tech_guide)links+='<a href="/view?p='+encodeURIComponent(pid+'/reproduce/TECH_GUIDE.md')+'" target="_blank">📘 技术说明书</a>';
+    links+='<a href="/view?p='+encodeURIComponent(pid+'/manifest.json')+'" target="_blank">🧾 manifest</a>';
+    const figs=(rp&&rp.figures)||[];
+    figs.slice(0,3).forEach((f,i)=>{links+='<a href="/files/'+pid+'/reproduce/'+esc(figrel(f))+'" target="_blank">📈 图'+(i+1)+'</a>'});
+    const mv=a.mvp||{};
+    if(mv.report)links+='<a href="/view?p='+encodeURIComponent(pid+'/mvp/MVP_REPORT.md')+'" target="_blank">🧪 MVP 报告</a>';
+    if(mv.figures_md)links+='<a href="/view?p='+encodeURIComponent(pid+'/mvp/figures/FIGURES.md')+'" target="_blank">🎨 作图说明</a>';
+    if(mv.report)links+='<a href="/view?p='+encodeURIComponent(pid+'/mvp/demo/README.md')+'" target="_blank">🧩 demo 代码</a>';
+    if(mv.notebook)links+='<a href="/files/'+pid+'/mvp/'+mv.notebook+'" target="_blank">📓 Notebook</a>';
+    if(mv.streamlit_app)links+='<a href="/view?p='+encodeURIComponent(pid+'/mvp/'+mv.streamlit_app)+'" target="_blank">🖥 Streamlit</a>';
+    const modRow='<div class="qrow" style="border:none;padding-top:10px">'
+      +'<input type="text" id="mod-'+esc(pid)+'" placeholder="改一次：例如「把优化器换成 Adam」" '
+      +'style="flex:1;min-width:190px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font-size:13px"/>'
+      +'<button class="qbtn" data-mod="'+esc(pid)+'">改一次</button>'
+      +'<button class="qbtn" data-vers="'+esc(pid)+'">版本</button>'
+      +'<button class="qbtn danger" data-del="'+esc(pid)+'">删除</button></div>';
+    return '<div class="card"><h3>'+esc(r.title||pid)+'</h3>'
+      +'<div class="meta">'+esc(pid)+' · '+(r.created_at||'')+'</div>'
+      +'<div class="tags">'
+      +(rp?tag(rp.mode_label||rp.mode,''):'')
+      +tag('章节 '+st.sections,' gray')+tag('表格 '+st.tables,' gray')
+      +tag('图 '+st.figures,' gray')+tag('伪代码 '+st.algorithms,' gray')
+      +(ck.pass?tag('pass '+ck.pass,' pass'):'')
+      +(ck.warn?tag('warn '+ck.warn,' warn'):'')
+      +(ck.fail?tag('fail '+ck.fail,' fail'):'')
+      +'</div><div class="links">'+links+'</div>'+modRow+'</div>';
+  }).join('');
+  grid.querySelectorAll('[data-mod]').forEach(b=>{b.onclick=()=>modifyMvp(b.getAttribute('data-mod'))});
+  grid.querySelectorAll('[data-vers]').forEach(b=>{b.onclick=()=>showVersions(b.getAttribute('data-vers'))});
+  grid.querySelectorAll('[data-del]').forEach(b=>{b.onclick=()=>deleteRun(b.getAttribute('data-del'))});
+}
+async function modifyMvp(pid){
+  const el=document.getElementById('mod-'+pid);
+  const instr=(el&&el.value||'').trim();
+  const ht=document.getElementById('htoast');
+  if(!instr){ ht.textContent='请先填「改一次」的内容'; return }
+  try{
+    const r=await fetch('/api/mvp/'+encodeURIComponent(pid)+'/modify',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({instruction:instr,confirm:document.getElementById('confirm').checked})});
+    const d=await r.json();
+    ht.textContent=r.ok?('已入队修改（'+d.task_id+'）：'+instr):('提交失败：'+friendlyErr(r.status,d.detail||'','confirmWrap'));
+    if(el) el.value='';
+  }catch(e){ ht.textContent='提交失败：'+e }
+  loadQueue();
+}
+async function showVersions(pid){
+  const prog=document.getElementById('hprog');
+  try{
+    const d=await (await fetch('/api/mvp/'+encodeURIComponent(pid)+'/versions')).json();
+    const v=d.versions||{}, live=v.live||{}, hist=v.history||[];
+    let html='<div class="meta">版本 · '+esc(pid)+' · 当前 v'+(v.current||1)
+      +(live.instruction?('（上次指令：'+esc(live.instruction)+'）'):'')+'</div>';
+    if(!hist.length) html+='<div class="stage">还没有历史版本。点「改一次」会存档当前版本并生成 diff。</div>';
+    hist.forEach(e=>{
+      html+='<div class="stage">v'+esc(e.n)+' · '+esc(e.archived_at||'')
+        +(e.instruction?(' · 指令：'+esc(e.instruction)):'')
+        +' · '+(e.diff_lines?esc(e.diff_lines)+' 行 diff':'无 diff')
+        +(e.diff?' · <a href="/view?p='+encodeURIComponent(pid+'/mvp/'+e.diff)+'" target="_blank">看 diff</a>':'')
+        +'</div>';
+    });
+    prog.innerHTML=html;
+  }catch(e){ prog.innerHTML='<div class="err">版本读取失败：'+esc(e)+'</div>' }
+}
+const prog=document.getElementById('prog');
+const ICON={pending:'○',running:'◐',done:'●',reused:'◍',failed:'✗'};
+const SZH={pending:'待执行',running:'进行中',done:'已完成',reused:'复用上次产物（跳过）',failed:'失败'};
+function stageList(p){
+  if(!p||!p.stages)return '<div class="meta">尚无阶段记录</div>';
+  return p.stages.map(s=>'<div class="stage">'+(ICON[s.status]||'·')+' <b>'+esc(s.name)+'</b> '
+    +esc(SZH[s.status]||s.status)+(s.elapsed_s?' · '+s.elapsed_s+'s':'')
+    +(s.note?' · <span class="err">'+esc(String(s.note).slice(0,180))+'</span>':'')+'</div>').join('');
+}
+async function pollRun(pid){
+  for(let i=0;i<400;i++){
+    let r;
+    try{ r=await (await fetch('/api/run/'+encodeURIComponent(pid)+'/progress')).json(); }
+    catch(e){ toast.textContent='进度查询失败：'+e; return; }
+    const cur=(r.progress&&r.progress.current)?('（'+r.progress.current+'）'):'';
+    prog.innerHTML='<div class="meta">阶段进度 · '+esc(r.paper_id)+esc(cur)+'</div>'+stageList(r.progress);
+    if(r.job&&(r.job.status==='ok'||r.job.status==='done')){toast.textContent='完成：'+r.paper_id;await load();return}
+    if(r.job&&(r.job.status==='error'||r.job.status==='failed')){
+      toast.textContent='失败：'+(r.job.detail||'');
+      prog.innerHTML+='<div class="err">'+esc(r.job.detail||'')+'</div>';return;
+    }
+    await new Promise(s=>setTimeout(s,1200));
+  }
+  toast.textContent='进度轮询超时（任务可能仍在后台跑，稍后刷新即可）';
+}
+let confirmRequired=false;
+function syncConfirmHints(){
+  [['confirm','confwarn','confirmWrap'],['bconfirm','bconfwarn','bconfirmWrap']].forEach(function(pair){
+    const box=document.getElementById(pair[0]),warn=document.getElementById(pair[1]),wrap=document.getElementById(pair[2]);
+    if(!box||!warn) return;
+    if(wrap) wrap.style.display=confirmRequired?'flex':'none';
+    const missing=confirmRequired&&!box.checked;
+    warn.style.display=missing?'block':'none';
+    warn.textContent=missing?'⚠ 还没勾选「我确认在本机运行生成的代码」——现在点「生成」/拖文件/提交都会被直接拒绝。':'';
+  });
+}
+function friendlyErr(status,detail,wrapId){
+  if(status===409){
+    const el=document.getElementById(wrapId);
+    if(el){
+      el.style.outline='2px solid #dc2626'; el.style.borderRadius='9px'; el.style.padding='3px 8px';
+      setTimeout(function(){el.style.outline='';el.style.padding='';},3000);
+    }
+    return '需要先勾选「我确认在本机运行生成的代码」——在本机跑生成的论文代码等于执行任意代码，所以这一步得你手动确认；勾上再点一次即可。';
+  }
+  if(status===413) return '文件太大，超过 200MB 上限。';
+  if(status===400) return detail||'请求被拒绝。';
+  return detail||'请求失败';
+}
+async function loadSandbox(){
+  try{
+    const d=await (await fetch('/api/sandbox')).json();
+    const p=d.policy||{}, low=p.risk==='low';
+    document.getElementById('banner').innerHTML='<div class="banner '+(low?'ok':'risk')+'">'
+      +'执行沙箱：<b>'+esc(p.mode)+'</b> · '+esc(p.isolation||'')+' · 风险：'+(low?'低':'高')
+      +' · 网络：'+esc(p.network||'-')
+      +'<br>'+esc(d.notice||'')
+      +(d.require_confirm&&p.mode!=='container'?'<br><b>提交前请先勾选下方「我确认在本机运行生成的代码」。</b>':'')
+      +'</div>';
+    confirmRequired=!!(d.require_confirm&&p.mode!=='container');
+    syncConfirmHints();
+  }catch(e){}
+}
+loadSandbox();
+go.onclick=async()=>{
+  const src=document.getElementById('src').value.trim();
+  if(!src){toast.textContent='请输入链接 / 本机路径，或把文件拖进上面的框';return}
+  go.disabled=true;
+  document.getElementById('prog').innerHTML='';toast.textContent='已提交，后台处理中…';
+  try{
+    const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({source:src,explain:'courseware,podcast',reproduce:true,audio:true,
+        resume:document.getElementById('resume').checked,confirm:document.getElementById('confirm').checked})});
+    const d=await r.json();
+    if(!r.ok||!d.paper_id){toast.textContent='无法提交：'+friendlyErr(r.status,d.detail||JSON.stringify(d),'confirmWrap');go.disabled=false;return}
+    await pollRun(d.paper_id);
+  }catch(e){toast.textContent='请求失败：'+e+'（服务还在运行吗？双击 start_demo.bat 可重启）'}
+  go.disabled=false;
+};
+async function loadQueue(){
+  const q=document.getElementById('queue');
+  let d;
+  try{ d=await (await fetch('/api/tasks?limit=15')).json(); }
+  catch(e){ q.innerHTML='<h4>任务队列</h4><div class="meta">队列读取失败：'+esc(e)+'</div>'; return; }
+  const st=d.stats||{}, rows=d.tasks||[];
+  const chips=['pending','running','done','failed','cancelled']
+    .filter(k=>st[k]).map(k=>'<span class="qstat '+k+'">'+esc(k)+' '+st[k]+'</span>').join('')
+    || '<span class="qstat">空</span>';
+  const head='<h4>任务队列 · 并发上限 '+d.concurrency+' · 单任务超时 '
+    +(d.timeout_s?d.timeout_s+'s':'不限')+'</h4>'
+    +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">'+chips+'</div>';
+  const body=rows.length?rows.map(t=>{
+    const live=t.status==='running'&&t.progress&&t.progress.current?(' · 当前阶段 '+esc(t.progress.current)):'';
+    const err=t.error?(' · <span class="err">'+esc(String(t.error).slice(0,120))+'</span>'
+      +'<button class="qbtn" data-copy="'+esc(t.id)+'" title="复制完整错误">复制错误</button>'):'';
+    const cancel=(t.status==='pending'||t.status==='running')
+      ?'<button class="qbtn" data-cancel="'+esc(t.id)+'">取消</button>':'';
+    return '<div class="qrow"><span class="qstat '+esc(t.status)+'">'+esc(t.status_zh||t.status)+'</span>'
+      +'<span>'+esc(t.kind)+'</span><b>'+esc(t.label||t.source)+'</b>'
+      +'<span class="meta" style="margin:0">'+esc(t.created_at)+live+err+'</span>'+cancel+'</div>';
+  }).join(''):'<div class="meta">还没有任务。到「单篇提交」或「批量提交」发起一个吧。</div>';
+  q.innerHTML=head+body;
+  q.querySelectorAll('[data-cancel]').forEach(b=>{b.onclick=()=>cancelTask(b.getAttribute('data-cancel'))});
+  q.querySelectorAll('[data-copy]').forEach(b=>{b.onclick=()=>copyError(b.getAttribute('data-copy'))});
+  if((st.pending||0)+(st.running||0)>0 && !window.__qpoll){ window.__qpoll=setTimeout(()=>{window.__qpoll=null;loadQueue()},2000); }
+}
+async function copyError(id){
+  try{
+    const d=await (await fetch('/api/tasks/'+encodeURIComponent(id))).json();
+    const t=(d||{}).task||{};
+    const text=['task '+id, 'status '+t.status, 'kind '+t.kind, 'source '+t.source,
+                'error '+(t.error||''), '', JSON.stringify(d.progress||{},null,2)].join('\\n');
+    if(navigator.clipboard&&navigator.clipboard.writeText){ await navigator.clipboard.writeText(text).catch(()=>{}); }
+    document.getElementById('hprog').innerHTML='<div class="meta">完整错误（可手动复制）· task '+esc(id)+'</div><pre style="white-space:pre-wrap;font-size:12.5px;background:#f8faff;border:1px solid #e8ecf6;border-radius:10px;padding:10px">'+esc(text)+'</pre>';
+  }catch(e){ document.getElementById('htoast').textContent='错误读取失败：'+e }
+}
+async function cancelTask(id){
+  try{ const r=await fetch('/api/tasks/'+encodeURIComponent(id)+'/cancel',{method:'POST'});
+    const d=await r.json();
+    document.getElementById('htoast').textContent=r.ok?('取消：'+(d.note||d.status)):('取消失败：'+(d.detail||'')); }
+  catch(e){ document.getElementById('htoast').textContent='取消失败：'+e }
+  loadQueue();
+}
+async function deleteRun(pid){
+  if(!window.confirm('删除「'+pid+'」？会同时删除产物目录、运行记录、队列任务与上传原件，不可恢复。'))return;
+  try{
+    const r=await fetch('/api/runs/'+encodeURIComponent(pid),{method:'DELETE'});
+    const d=await r.json();
+    if(!r.ok){ document.getElementById('htoast').textContent='删除失败：'+(d.detail||''); return }
+    const rm=d.removed||{};
+    document.getElementById('htoast').textContent='已删除 '+pid
+      +'（产物目录 '+(rm.outputs?'有':'无')+'、记录 '+rm.records+' 条、队列任务 '+(rm.tasks||0)+' 个'
+      +(rm.incoming?'、上传原件已删':'')+'）';
+  }catch(e){ document.getElementById('htoast').textContent='删除失败：'+e }
+  load(); loadQueue();
+}
+async function batchSubmit(){
+  const bt=document.getElementById('btoast');
+  const lines=document.getElementById('batch').value.replace(/\\r/g,'').split('\\n').map(s=>s.trim()).filter(Boolean);
+  if(!lines.length){ bt.textContent='请每行填一条来源（链接 / 本机路径 / arXiv 编号）'; return }
+  bt.textContent='提交中…';
+  try{
+    const r=await fetch('/api/batch',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sources:lines,explain:'courseware,podcast',reproduce:true,audio:true,
+        resume:document.getElementById('bresume').checked,confirm:document.getElementById('bconfirm').checked})});
+    const d=await r.json();
+    bt.textContent=r.ok?('已入队 '+d.n+' 篇（排队执行；切到「历史记录」看进度）'):('提交失败：'+friendlyErr(r.status,d.detail||'','bconfirmWrap'));
+  }catch(e){ bt.textContent='请求失败：'+e+'（服务还在运行吗？双击 start_demo.bat 可重启）' }
+  loadQueue();
+}
 
-function applyPreset(){
-  const v=preset.value;
-  const offline=v==='offline';
-  llmKey.disabled=offline; llmUrl.disabled=offline; llmModel.disabled=offline;
-  document.getElementById('keyField').style.opacity=offline?.45:1;
-  document.getElementById('urlField').style.opacity=offline?.45:1;
-  document.getElementById('modelField').style.opacity=offline?.45:1;
-  const fill=(url,model)=>{
-    if(!llmUrl.value||llmUrl.dataset.auto==='1'){llmUrl.value=url;llmUrl.dataset.auto='1'}
-    if(!llmModel.value||llmModel.dataset.auto==='1'){llmModel.value=model;llmModel.dataset.auto='1'}
+// -- 页签 / 来源识别 / 文件上传 ------------------------------------------------ #
+document.querySelectorAll('.tabs button').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.tabs button').forEach(x=>{x.classList.toggle('on',x===b)});
+    ['single','batch','history'].forEach(t=>{document.getElementById('tab-'+t).hidden=(t!==b.dataset.tab)});
+    if(b.dataset.tab==='history'){ load(); loadQueue(); }
   };
-  if(v==='deepseek'){
-    fill('https://api.deepseek.com/v1','deepseek-chat');
-  }else if(v==='openrouter'){
-    fill('https://openrouter.ai/api/v1','openai/gpt-4o-mini');
-  }else if(v==='siliconflow'){
-    fill('https://api.siliconflow.cn/v1','deepseek-ai/DeepSeek-V3');
-  }else if(v==='custom'){
-    llmUrl.dataset.auto='0'; llmModel.dataset.auto='0';
-    if(!llmUrl.value) llmUrl.placeholder='https://api.openai.com/v1';
-    if(!llmModel.value) llmModel.placeholder='gpt-4o-mini';
-  }else{
-    llmStatus.textContent='离线模式：不调用远程模型';llmStatus.className='muted';
-  }
-}
-preset.onchange=applyPreset;
-llmUrl.addEventListener('input',()=>{llmUrl.dataset.auto='0'});
-llmModel.addEventListener('input',()=>{llmModel.dataset.auto='0'});
-function llmPayload(){
-  const v=preset.value;
-  if(v==='offline') return {llm_mode:'offline', persist:true};
-  const body={llm_mode:'openai', persist:true};
-  const k=llmKey.value.trim(); if(k) body.api_key=k;
-  const u=llmUrl.value.trim(); if(u) body.base_url=u;
-  const m=llmModel.value.trim(); if(m) body.model=m;
-  return body;
-}
-function showLlmSaved(d){
-  if(d.has_key){
-    llmKey.value='';
-    llmKey.placeholder='已保存'+(d.key_hint?' '+d.key_hint:'')+'，留空继续使用';
-  }
-}
-llmApply.onclick=async()=>{
-  llmApply.disabled=true; llmStatus.className='muted'; llmStatus.textContent='保存中…';
+});
+let clsTimer=null;
+async function classifyHint(){
+  const el=document.getElementById('cls');
+  const v=document.getElementById('src').value.trim();
+  if(!v){ el.innerHTML=''; return }
   try{
-    const r=await fetch('/api/llm/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(llmPayload())});
-    const d=await r.json();
-    if(d.ok){
-      showLlmSaved(d);
-      llmStatus.className='ok';
-      llmStatus.textContent='已保存到本机 · '+(d.mode||'')+' · '+(d.model||'')+(d.has_key?(' · '+(d.key_hint||'已配置 Key')+' · '+(d.key_source_label||'')):' · 无 Key');
-    }
-    else {llmStatus.className='err'; llmStatus.textContent=d.error||JSON.stringify(d);}
-  }catch(e){llmStatus.className='err';llmStatus.textContent='失败：'+e}
-  llmApply.disabled=false;
-};
-llmTest.onclick=async()=>{
-  llmTest.disabled=true;
-  llmStatus.className='muted'; llmStatus.textContent='测试中…';
-  try{
-    const r=await fetch('/api/llm/test',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(llmPayload())});
-    const d=await r.json();
-    if(d.ok){
-      showLlmSaved(d);
-      llmStatus.className='ok';
-      llmStatus.textContent='连接成功 · '+(d.latency_ms||'?')+' ms · '+(d.model||'')+(d.key_hint?' · 已写入 '+d.key_hint:'')+(d.preview?' · '+String(d.preview).slice(0,40):'');
-    }else{
-      llmStatus.className='err';
-      llmStatus.textContent='连接失败：'+(d.error||JSON.stringify(d));
-    }
-  }catch(e){llmStatus.className='err';llmStatus.textContent='请求失败：'+e}
-  llmTest.disabled=false;
-};
-function applyTtsPreset(){
-  const v=ttsPreset.value;
-  if(v==='siliconflow'){
-    if(!ttsUrl.value||ttsUrl.dataset.auto==='1'){ttsUrl.value='https://api.siliconflow.cn/v1';ttsUrl.dataset.auto='1'}
-    if(!ttsModel.value||ttsModel.dataset.auto==='1'){ttsModel.value='FunAudioLLM/CosyVoice2-0.5B';ttsModel.dataset.auto='1'}
-  }else if(v==='openai_speech'){
-    ttsUrl.dataset.auto='0'; ttsModel.dataset.auto='0';
-    if(!ttsUrl.value) ttsUrl.placeholder='https://api.openai.com/v1';
-  }
+    const d=await (await fetch('/api/classify?source='+encodeURIComponent(v))).json();
+    el.innerHTML='识别为：<b>'+esc(d.kind_label||d.kind)+'</b>'
+      +(d.paper_id?(' · 产物目录 <code>'+esc(d.paper_id)+'</code>'):'')
+      +(d.notice?(' · '+esc(d.notice)):'');
+  }catch(e){ el.innerHTML='' }
 }
-ttsPreset.onchange=applyTtsPreset; applyTtsPreset();
-ttsUrl.addEventListener('input',()=>{ttsUrl.dataset.auto='0'});
-ttsModel.addEventListener('input',()=>{ttsModel.dataset.auto='0'});
-function ttsPayload(){
-  const body={provider:ttsPreset.value, persist:true};
-  const k=ttsKey.value.trim(); if(k) body.api_key=k;
-  const u=ttsUrl.value.trim(); if(u) body.base_url=u;
-  const m=ttsModel.value.trim(); if(m) body.model=m;
-  return body;
-}
+document.getElementById('src').addEventListener('input',()=>{clearTimeout(clsTimer);clsTimer=setTimeout(classifyHint,350)});
+['confirm','bconfirm'].forEach(id=>{const el=document.getElementById(id); if(el) el.addEventListener('change',syncConfirmHints)});
 
-ttsTest.onclick=async()=>{
-  ttsTest.disabled=true;
-  ttsStatusEl.className='muted';
-  ttsStatusEl.textContent='测试中…';
-  try{
-    const r=await fetch('/api/tts/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ttsPayload())});
-    const d=await r.json();
-    if(d.ok){
-      ttsKey.value='';
-      if(d.key_hint) ttsKey.placeholder='已保存 '+d.key_hint+'，留空继续使用';
-      ttsStatusEl.className='ok';
-      ttsStatusEl.textContent='连接成功 · '+(d.latency_ms||'?')+' ms · '+(d.model||d.mode||'')+(d.key_hint?' · '+d.key_hint:'');
-    }else{
-      ttsStatusEl.className='err';
-      ttsStatusEl.textContent='测试失败：'+(d.error||JSON.stringify(d));
-    }
-  }catch(e){ttsStatusEl.className='err';ttsStatusEl.textContent='测试失败：'+e}
-  ttsTest.disabled=false;
+async function uploadOne(file,pollIt,confirmId,resumeId){
+  const qs='?filename='+encodeURIComponent(file.name)
+    +'&confirm='+(document.getElementById(confirmId).checked?'true':'false')
+    +'&resume='+(document.getElementById(resumeId).checked?'true':'false');
+  const r=await fetch('/api/upload'+qs,{method:'POST',body:file});
+  const d=await r.json().catch(function(){return {}});
+  if(!r.ok){
+    const err=new Error(d.detail||('HTTP '+r.status));
+    err.status=r.status;
+    throw err;
+  }
+  if(pollIt) await pollRun(d.paper_id);
+  return d;
+}
+const drop=document.getElementById('drop'),fileIn=document.getElementById('file');
+drop.onclick=()=>fileIn.click();
+fileIn.onchange=()=>{const f=fileIn.files[0];fileIn.value='';if(f)handleSingleFile(f)};
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('hot')}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('hot')}));
+drop.addEventListener('drop',e=>{const f=e.dataTransfer&&e.dataTransfer.files[0];if(f)handleSingleFile(f)});
+async function handleSingleFile(f){
+  toast.textContent='上传中：'+f.name;
+  document.getElementById('prog').innerHTML='';
+  try{ await uploadOne(f,true,'confirm','resume') }
+  catch(e){ toast.textContent='上传失败：'+friendlyErr(e.status,e.message,'confirmWrap') }
+}
+document.getElementById('txtbtn').onclick=()=>document.getElementById('txtfile').click();
+document.getElementById('txtfile').onchange=()=>{
+  const f=document.getElementById('txtfile').files[0]; document.getElementById('txtfile').value='';
+  if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    document.getElementById('batch').value=String(rd.result||'').replace(/\\r/g,'').trim();
+    document.getElementById('btoast').textContent='已载入列表：'+f.name;
+  };
+  rd.readAsText(f);
 };
-
-ttsApply.onclick=async()=>{
-  ttsApply.disabled=true; ttsStatusEl.textContent='应用中…';
-  try{
-    const r=await fetch('/api/tts/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ttsPayload())});
-    const d=await r.json();
-    if(d.ok){
-      ttsKey.value='';
-      if(d.key_hint) ttsKey.placeholder='已保存 '+d.key_hint+'，留空继续使用';
-      ttsStatusEl.className='ok';
-      ttsStatusEl.textContent='已保存到本机 · '+(d.provider||'')+' · '+(d.model||'')+(d.has_key?(' · '+(d.key_hint||'已配置 Key')):' · 无 Key');
-    }else{
-      ttsStatusEl.className='err'; ttsStatusEl.textContent=d.error||JSON.stringify(d);
-    }
-  }catch(e){ttsStatusEl.textContent='失败：'+e}
-  ttsApply.disabled=false;
+document.getElementById('pdfbtn').onclick=()=>document.getElementById('pdfs').click();
+document.getElementById('pdfs').onchange=async()=>{
+  const inp=document.getElementById('pdfs'); const files=[].slice.call(inp.files); inp.value='';
+  if(!files.length) return;
+  const bt=document.getElementById('btoast'); let ok=0; const bad=[];
+  for(let i=0;i<files.length;i++){
+    bt.textContent='上传中…（'+(i+1)+'/'+files.length+'）'+files[i].name;
+    try{ await uploadOne(files[i],false,'bconfirm','bresume'); ok++ }
+    catch(e){ bad.push(files[i].name+'：'+friendlyErr(e.status,e.message,'bconfirmWrap')) }
+  }
+  bt.textContent='已上传 '+ok+' 个文件（已入队）'+(bad.length?('；失败 '+bad.length+'：'+bad.join('；')):'');
+  loadQueue();
 };
-applyPreset();
-(async()=>{
-  try{
-    const s=await (await fetch('/api/llm/status')).json();
-    if(s&&(s.mode==='openai'||s.has_key)){
-      const bu=(s.base_url||'');
-      preset.value=bu.includes('deepseek.com')?'deepseek':bu.includes('openrouter')?'openrouter':bu.includes('siliconflow')?'siliconflow':(s.mode==='offline'?'offline':'custom');
-      if(s.base_url){llmUrl.value=s.base_url;llmUrl.dataset.auto='0'}
-      if(s.model){llmModel.value=s.model;llmModel.dataset.auto='0'}
-      applyPreset();
-    }
-    if(s&&s.has_key){
-      showLlmSaved(s);
-      llmStatus.className='ok';
-      llmStatus.textContent='已从 '+(s.key_source_label||'本机')+' 加载，无需重复输入'+(s.key_hint?' · '+s.key_hint:'')+' · '+(s.mode||'')+' · '+(s.model||'');
-    }else{
-      llmStatus.className='muted';
-      llmStatus.textContent='尚未保存 Key：填一次并点「保存到本机」，之后不用再填';
-    }
-  }catch(e){}
-})();
-(async()=>{
-  try{
-    const s=await (await fetch('/api/tts/status')).json();
-    if(s){
-      if(s.provider==='edge') ttsPreset.value='edge';
-      else if(s.provider==='openai_speech') ttsPreset.value='openai_speech';
-      else ttsPreset.value='siliconflow';
-      if(s.base_url){ttsUrl.value=s.base_url;ttsUrl.dataset.auto='0'}
-      if(s.model){ttsModel.value=s.model;ttsModel.dataset.auto='0'}
-      applyTtsPreset();
-      if(s.has_key){
-        ttsKey.value='';
-        ttsKey.placeholder='已保存'+(s.key_hint?' '+s.key_hint:'')+'，留空继续使用';
-        ttsStatusEl.className='ok';
-        ttsStatusEl.textContent='已从 '+(s.key_source_label||'本机')+' 加载，无需重复输入'+(s.key_hint?' · '+s.key_hint:'')+' · '+(s.provider||'')+' · '+(s.model||'');
-      }else{
-        ttsStatusEl.className='muted';
-        ttsStatusEl.textContent='未保存 TTS Key · 可用 edge-tts · '+(s.provider||'')+' · '+(s.model||'');
-      }
-    }
-  }catch(e){}
-})();
-
+loadQueue();
+load();
 </script></body></html>
 """
-
 
 
 _VIEWER_HTML = """<!DOCTYPE html>
@@ -1788,53 +824,13 @@ a{color:#4f6bed}
 </style></head>
 <body><div class="wrap">
 <div class="top" id="path"></div>
-<div id="ttsBar" style="display:none;margin:0 0 18px;padding:14px 16px;background:#f8faff;border:1px solid #e3e8f2;border-radius:12px">
-  <div style="font-weight:700;margin-bottom:8px">播客语音（SiliconFlow / edge-tts）</div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    <input type="password" id="vTtsKey" placeholder="TTS API Key（可选，仅内存）" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid #e3e8f2;border-radius:10px"/>
-    <input type="text" id="vTtsModel" placeholder="FunAudioLLM/CosyVoice2-0.5B" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid #e3e8f2;border-radius:10px"/>
-    <button type="button" id="vTtsGo" style="padding:8px 16px;border:none;border-radius:10px;background:linear-gradient(135deg,#4f6bed,#8b5cf6);color:#fff;font-weight:650;cursor:pointer">生成语音</button>
-  </div>
-  <div id="vTtsMsg" style="margin-top:8px;font-size:13px;color:#5d6b85"></div>
-  <audio id="vTtsAudio" controls style="width:100%;margin-top:10px;display:none"></audio>
-</div>
 <div id="out">加载中…</div>
 </div>
 <script>
 const P=new URLSearchParams(location.search).get('p');
-document.getElementById('path').innerHTML='产物：<code>'+P+'</code> · <a href="/">返回首页</a> · <a href="/settings">设置</a>';
-(function(){
-  if(P && /explain\/podcast_script\.md$/i.test(P)){
-    document.getElementById('ttsBar').style.display='block';
-    const pid=P.split('/')[0];
-    const go=document.getElementById('vTtsGo');
-    const msg=document.getElementById('vTtsMsg');
-    const audio=document.getElementById('vTtsAudio');
-    // try existing audio
-    fetch('/files/'+pid+'/explain/podcast.mp3',{method:'HEAD'}).then(r=>{
-      if(r.ok){audio.src='/files/'+pid+'/explain/podcast.mp3';audio.style.display='block';msg.textContent='已有音频，可直接播放或重新生成。'}
-    }).catch(()=>{});
-    go.onclick=async()=>{
-      go.disabled=true; msg.textContent='合成中…';
-      const body={paper_id:pid, provider:'siliconflow', base_url:'https://api.siliconflow.cn/v1'};
-      const k=document.getElementById('vTtsKey').value.trim(); if(k) body.api_key=k;
-      const m=document.getElementById('vTtsModel').value.trim(); if(m) body.model=m;
-      else body.model='FunAudioLLM/CosyVoice2-0.5B';
-      try{
-        const r=await fetch('/api/tts/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        const d=await r.json();
-        if(d.ok&&d.url){
-          audio.src=d.url+'?t='+Date.now(); audio.style.display='block'; audio.play().catch(()=>{});
-          msg.textContent='完成 · 引擎 '+(d.engine||'')+(d.warnings&&d.warnings.length?' · '+d.warnings.join('; '):'');
-        }else{
-          msg.textContent='失败：'+(d.error||d.detail||JSON.stringify(d));
-        }
-      }catch(e){msg.textContent='请求失败：'+e}
-      go.disabled=false;
-    };
-  }
-})();
+document.getElementById('path').innerHTML='产物：<code>'+P+'</code> · <a href="/">返回总览</a>';
 function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+const DIR=P.slice(0,P.lastIndexOf('/')+1);
 function md(src){
   const lines=src.split(/\\r?\\n/);let out=[],i=0,inCode=false,codeBuf=[],list=null,table=[];
   function flushList(){if(list){out.push('</'+list+'>');list=null}}
@@ -1843,6 +839,9 @@ function md(src){
     +rows.map(r=>'<tr>'+r.map(c=>'<td>'+esc(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table>');table=[]}}
   function inline(t){
     return esc(t).replace(/`([^`]+)`/g,'<code>$1</code>')
+      .replace(/!\\[([^\\]]*)\\]\\(([^)]+)\\)/g,(m,alt,u)=>'<img alt="'+alt+'" src="'
+        +(/^(https?:|\\/)/.test(u)?u:'/files/'+DIR+u)
+        +'" style="max-width:100%;display:block;margin:14px 0;border:1px solid #e8ecf6;border-radius:10px"/>')
       .replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>')
       .replace(/\\[([^\\]]+)\\]\\((http[^)]+)\\)/g,'<a href="$2" target="_blank">$1</a>');
   }

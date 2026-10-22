@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Estimating Absolute Protein−Protein Binding Free Energies by a Super Learner Model · 课件</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f5f7fb; --card:#ffffff; --ink:#1b2130; --muted:#5d6b85;
+  --line:#e3e8f2; --brand:#4f6bed; --brand2:#8b5cf6; --accent:#0ea5a4;
+  --warn:#d97706; --fail:#dc2626; --pass:#16a34a;
+  --radius:18px; --shadow:0 10px 30px rgba(24,39,75,.10);
+}
+html,body{height:100%}
+body{
+  background:radial-gradient(1100px 620px at 12% -8%,#e8edff 0%,transparent 60%),
+             radial-gradient(900px 520px at 108% 4%,#eafaf7 0%,transparent 55%),
+             var(--bg);
+  color:var(--ink);
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.deck{max-width:1120px;margin:0 auto;padding:28px 20px 76px}
+.slide{
+  display:none;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--radius);box-shadow:var(--shadow);
+  padding:40px 46px 34px;min-height:600px;position:relative;overflow:hidden;
+}
+.slide.active{display:block;animation:in .32s cubic-bezier(.2,.7,.3,1)}
+@keyframes in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.slide::after{
+  content:"";position:absolute;inset:0 0 auto 0;height:5px;
+  background:linear-gradient(90deg,var(--brand),var(--brand2),var(--accent));
+}
+.kicker{font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--brand);font-weight:700;margin-bottom:10px}
+h1{font-size:40px;line-height:1.25;letter-spacing:-.02em;font-weight:800}
+h2{font-size:27px;line-height:1.3;letter-spacing:-.01em;font-weight:750;margin-bottom:6px}
+h2+.rule{height:3px;width:64px;border-radius:3px;background:linear-gradient(90deg,var(--brand),var(--brand2));margin:14px 0 24px}
+.sub{color:var(--muted);font-size:15.5px;margin-top:14px}
+ul.bullets{list-style:none;display:grid;gap:13px;margin-top:6px}
+ul.bullets li{
+  position:relative;padding:14px 18px 14px 44px;background:#f8faff;
+  border:1px solid var(--line);border-radius:12px;font-size:16.2px;
+}
+ul.bullets li::before{
+  content:"";position:absolute;left:18px;top:22px;width:9px;height:9px;border-radius:50%;
+  background:linear-gradient(135deg,var(--brand),var(--brand2));
+}
+.slide.title-slide{display:none;background:linear-gradient(135deg,#3b4fd8 0%,#6d4de0 46%,#0e9f9a 100%);color:#fff;border:none}
+.slide.title-slide.active{display:block}
+.slide.title-slide::after{display:none}
+.slide.title-slide .kicker{color:rgba(255,255,255,.85)}
+.slide.title-slide .sub{color:rgba(255,255,255,.9)}
+.slide.title-slide ul.bullets li{background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.24);color:#fff}
+.slide.title-slide ul.bullets li::before{background:#fff}
+.agenda{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:8px}
+.agenda .item{
+  background:#f8faff;border:1px solid var(--line);border-radius:12px;padding:13px 16px;font-size:15.4px;
+  display:flex;gap:12px;align-items:flex-start;
+}
+.agenda .num{
+  flex:0 0 26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:13px;font-weight:700;
+  color:#fff;background:linear-gradient(135deg,var(--brand),var(--brand2));
+}
+table.data{border-collapse:collapse;width:100%;font-size:14.4px;margin-top:8px;border-radius:12px;overflow:hidden}
+table.data th,table.data td{border-bottom:1px solid var(--line);padding:9px 12px;text-align:left}
+table.data th{background:#eef2ff;font-weight:700;color:#39457a;white-space:nowrap}
+table.data tr:nth-child(even) td{background:#fafbff}
+table.data td.num{text-align:right;font-variant-numeric:tabular-nums}
+.caption{font-size:13.6px;color:var(--muted);margin-top:12px;padding-left:12px;border-left:3px solid var(--line)}
+figure{margin:16px 0 0;text-align:center}
+figure img{max-width:100%;max-height:430px;border-radius:12px;border:1px solid var(--line)}
+.notes{
+  margin-top:24px;padding:15px 18px;background:linear-gradient(180deg,#fffdf5,#fff9e8);
+  border:1px dashed #ecd9a6;border-radius:12px;font-size:14.6px;color:#6b5a2c;
+}
+.notes b{color:#a06a12}
+.pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:700;background:#eef2ff;color:#3d4ea8;margin-right:6px}
+.takeaway ul.bullets li::before{background:linear-gradient(135deg,var(--accent),#22c55e)}
+.bar{position:fixed;left:0;right:0;bottom:0;background:rgba(255,255,255,.92);border-top:1px solid var(--line);backdrop-filter:blur(8px)}
+.bar-inner{max-width:1120px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:16px}
+.bar button{
+  border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:10px;
+  padding:8px 16px;font-size:14.5px;font-weight:600;cursor:pointer;transition:.15s;
+}
+.bar button:hover{border-color:var(--brand);color:var(--brand);transform:translateY(-1px)}
+.bar button:disabled{opacity:.4;cursor:not-allowed}
+.track{flex:1;height:7px;background:#e7ebf5;border-radius:99px;overflow:hidden}
+.fill{height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--brand2));transition:width .25s}
+.count{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:64px;text-align:right}
+.zone{position:fixed;top:0;bottom:52px;width:22%;cursor:pointer;z-index:5}
+.zone.left{left:0}.zone.right{right:0}
+.hint{position:fixed;bottom:64px;right:22px;font-size:12.5px;color:var(--muted);background:rgba(255,255,255,.9);border:1px solid var(--line);padding:6px 12px;border-radius:99px}
+@media print{
+  body{background:#fff}
+  .slide,.slide.title-slide{display:block!important;page-break-after:always;box-shadow:none;margin-bottom:16px;min-height:auto}
+  .bar,.zone,.hint{display:none!important}
+  .slide.title-slide{color:#fff}
+}
+@media (max-width:720px){
+  .slide{padding:26px 20px;min-height:auto}
+  h1{font-size:28px}h2{font-size:21px}
+  ul.bullets li{font-size:15px}
+}
+</style>
+</head>
+<body>
+<div class="deck"><section class="slide title-slide"><div class="kicker">Paper2Code · 论文精讲</div><h1>Estimating Absolute Protein−Protein Binding Free Energies by a Super Learner Model</h1><ul class="bullets" style="margin-top:26px"><li>Elton J. F. Chaves, João Sartori, Whendel M. Santos, Carlos H. B. Cruz</li><li>Protein−protein binding is central to most bio- chemical processes of all living beings. Its importance underlies mechanisms ranging from cell interactions to metabolic control…</li></ul><p class="sub">自动生成（provider: auto(openai-compatible(deepseek-flash @ https://api.deepseek.com/v1), remote)）· 共 17 页 · 使用 ← → 翻页，打印可导出 PDF</p></section><section class="slide"><div class="kicker">Agenda</div><h2>本次讲解路线</h2><div class='rule'></div><div class="agenda"><div class="item"><span class="num">1</span><span>引子：蛋白互作与结合自由能</span></div><div class="item"><span class="num">2</span><span>难题：为什么蛋白-蛋白ΔG难算</span></div><div class="item"><span class="num">3</span><span>已有路线：从metadynamics到机器学习</span></div><div class="item"><span class="num">4</span><span>本文要解决什么问题</span></div><div class="item"><span class="num">5</span><span>核心思想：Rosetta描述符+超级学习器</span></div><div class="item"><span class="num">6</span><span>数据：603个复合物如何筛选</span></div><div class="item"><span class="num">7</span><span>特征：界面描述符体系</span></div><div class="item"><span class="num">8</span><span>基学习器：十个模型的组合</span></div><div class="item"><span class="num">9</span><span>超级学习器：权重怎么学</span></div><div class="item"><span class="num">10</span><span>验证：105个独立复合物</span></div><div class="item"><span class="num">11</span><span>结果：1.98 kcal/mol与0.70相关</span></div><div class="item"><span class="num">12</span><span>对比：相对现有方法的定位</span></div><div class="item"><span class="num">13</span><span>可解释性与错误分析</span></div><div class="item"><span class="num">14</span><span>局限与PBEE复现路径</span></div></div></section><section class="slide"><div class="kicker">第 3 页 / 共 17 页</div><h2>引子：蛋白互作与结合自由能</h2><div class='rule'></div><ul class="bullets"><li>蛋白互作是多数生化过程核心</li><li>涉及细胞相互作用与代谢控制</li><li>也用于治疗性单抗开发</li><li>用于工业生物催化酶工程</li><li>用于生物传感器与药物筛选</li><li>ΔG0可评估结合亲和力</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：从摘要与引言说明蛋白-蛋白结合的重要性，ΔG0是结合亲和力指标，但实验获取困难且资源密集。可举例治疗性抗体、酶工程、生物传感器、人工蛋白复合物等应用。</div></section><section class="slide"><div class="kicker">第 4 页 / 共 17 页</div><h2>难题：为什么蛋白-蛋白ΔG难算</h2><div class='rule'></div><ul class="bullets"><li>蛋白-蛋白结合自由能更难计算</li><li>自由度数目更高</li><li>熵效应不可忽略</li><li>结合事件时间尺度长</li><li>超出常规分子模拟能力</li><li>实验测ΔG0资源密集</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：论文指出小分子或蛋白绝对结合自由能有分子力学方法，但蛋白-蛋白结合因自由度、熵效应和时间尺度更难。增强采样如metadynamics可提高精度，但计算成本高。</div></section><section class="slide"><div class="kicker">第 5 页 / 共 17 页</div><h2>已有路线：从metadynamics到机器学习</h2><div class='rule'></div><ul class="bullets"><li>metadynamics可算蛋白结合亲和力</li><li>计算需求高，难高通量</li><li>Wang协议测试19个复合物</li><li>标准误1.61 kcal/mol</li><li>Pearson相关0.84</li><li>社区转向机器与深度学习</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：metadynamics精度较好但计算昂贵，难以高通量。机器学习路线中，PRODIGY基于界面接触和非相互作用表面，81个复合物验证达到RMSE 1.89 kcal/mol、Pearson 0.73。</div></section><section class="slide"><div class="kicker">第 6 页 / 共 17 页</div><h2>本文要解决什么问题</h2><div class='rule'></div><ul class="bullets"><li>现有ML/DL模型常不通用</li><li>多用于单点或多点突变预测</li><li>依赖SKEMPI2小复合物子集</li><li>模型特异性强</li><li>性能随测试集变化显著</li><li>需通用且准确的绝对结合能模型</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：论文认为已有结构基ML/DL模型多针对突变或小数据子集，特异性强且测试集变化时性能波动大。本文目标是开发通用、准确的蛋白-蛋白绝对结合亲和力预测模型。</div></section><section class="slide"><div class="kicker">第 7 页 / 共 17 页</div><h2>核心思想：Rosetta描述符+超级学习器</h2><div class='rule'></div><ul class="bullets"><li>使用定制扩展Rosetta描述符列表</li><li>从数百个复合物提取特征</li><li>训练10种机器学习算法</li><li>以10个模型作为基学习器</li><li>用超级学习器组合预测</li><li>输出加权线性回归组合</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：方法核心是用大量Rosetta描述符表征复合物，训练10个基学习器，再由超级学习器做加权组合。超级学习器是集成学习，目标优于任一单模型。</div></section><section class="slide"><div class="kicker">第 8 页 / 共 17 页</div><h2>数据：603个复合物如何筛选</h2><div class='rule'></div><ul class="bullets"><li>初始选择603个X射线复合物</li><li>来源含PDBbind</li><li>来源含PRODIGY</li><li>来源含SKEMPI2</li><li>来源含docking benchmark 5.5</li><li>要求无缺口或缺失重原子</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：数据来自PDBbind、PRODIGY、SKEMPI2和蛋白-蛋白对接基准5.5，初筛603个X射线复合物，要求无缺口或缺失重原子且分辨率不超过2.5 Å，然后划分训练与验证。</div></section><section class="slide"><div class="kicker">第 9 页 / 共 17 页</div><h2>特征：界面描述符体系</h2><div class='rule'></div><ul class="bullets"><li>采用Rosetta计算的描述符</li><li>强调界面性质用于预测</li><li>界面面积是重要特征</li><li>形状互补性是重要特征</li><li>溶剂可及表面积重要</li><li>界面残基数重要</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：论文强调界面性质对亲和力预测重要。前期ANN工作列出界面面积、形状互补性、溶剂可及表面积和界面残基数等关键特征；本文进一步使用定制扩展的Rosetta描述符列表。</div></section><section class="slide"><div class="kicker">第 10 页 / 共 17 页</div><h2>基学习器：十个模型的组合</h2><div class='rule'></div><ul class="bullets"><li>使用10种机器学习算法</li><li>每个算法作为基学习器</li><li>基学习器分别给出预测</li><li>超级学习器融合多个预测</li><li>融合不同算法优势</li><li>降低单一模型弱点</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：10种机器学习算法作为基学习器，各自输出预测。超级学习器再组合这些输出，利用不同算法优势并降低单一模型弱点。</div></section><section class="slide"><div class="kicker">第 11 页 / 共 17 页</div><h2>超级学习器：权重怎么学</h2><div class='rule'></div><ul class="bullets"><li>SL是集成学习技术</li><li>组合多个基学习器预测</li><li>采用加权线性回归组合</li><li>权重由非负最小二乘计算</li><li>使用Lawson-Hanson算法</li><li>目标优于任一单模型</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：超级学习器通过加权线性回归组合基学习器输出，权重用非负最小二乘计算，采用Lawson-Hanson算法。其目标是获得比任何单一模型更好的预测性能。</div></section><section class="slide"><div class="kicker">第 12 页 / 共 17 页</div><h2>验证：105个独立复合物</h2><div class='rule'></div><ul class="bullets"><li>验证集含105个蛋白复合物</li><li>复合物取自主要蛋白数据库</li><li>包括BENCHMARK-5.5</li><li>包括PDBbind</li><li>包括PRODIGY</li><li>包括SKEMPI2</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：验证集为105个蛋白复合物，来自BENCHMARK-5.5、PDBbind、PRODIGY和SKEMPI2等主要数据库。该独立验证用于评估模型跨多样复合物的泛化能力。</div></section><section class="slide"><div class="kicker">第 13 页 / 共 17 页</div><h2>结果：1.98 kcal/mol与0.70相关</h2><div class='rule'></div><ul class="bullets"><li>验证RMSE为1.98 kcal/mol</li><li>Pearson相关系数为0.70</li><li>SL模型准确性提升</li><li>跨多样复合物具泛化性</li><li>精度可媲美昂贵计算法</li><li>也可媲美现有ML/DL工具</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：在105个复合物验证集上，SL模型达到RMSE 1.98 kcal/mol、Pearson相关0.70。论文称其精度可媲美计算昂贵的方法和现有ML/DL工具，并提升跨多样复合物的泛化性。</div></section><section class="slide"><div class="kicker">第 14 页 / 共 17 页</div><h2>对比：相对现有方法的定位</h2><div class='rule'></div><ul class="bullets"><li>metadynamics测试19个复合物</li><li>标准误1.61 kcal/mol</li><li>Pearson相关0.84</li><li>metadynamics计算需求高</li><li>难以高通量使用</li><li>PRODIGY验证81个复合物</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：metadynamics在19个复合物上标准误1.61、相关0.84，但计算昂贵难高通量。PRODIGY在81个复合物上RMSE 1.89、相关0.73。前期ANN约RMSE 2.5、相关0.53。本文定位是兼顾精度与通用性。</div></section><section class="slide"><div class="kicker">第 15 页 / 共 17 页</div><h2>可解释性与错误分析</h2><div class='rule'></div><ul class="bullets"><li>界面描述符提供预测依据</li><li>界面面积与形状互补性重要</li><li>溶剂可及表面积与残基数重要</li><li>SL权重由NNLS学习</li><li>验证集RMSE为1.98 kcal/mol</li><li>Pearson相关为0.70</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：节选未提供逐例误差分析，因此可用界面特征重要性和整体RMSE/Pearson讲可解释性。课堂应提醒：整体指标不能推断每个复合物的具体误差来源。</div></section><section class="slide"><div class="kicker">第 16 页 / 共 17 页</div><h2>局限与PBEE复现路径</h2><div class='rule'></div><ul class="bullets"><li>PBEE是Python流程</li><li>从PDB坐标计算绝对结合自由能</li><li>方法基于Rosetta量</li><li>使用10个基学习器与SL</li><li>代码开源在GitHub</li><li>验证使用105个复合物</li></ul><div class="notes"><b>讲解提示：</b>讲稿补充：PBEE为Python流程，输入PDB坐标即可快速估算绝对结合自由能。复现需准备Rosetta描述符、10个基学习器和超级学习器权重。代码在GitHub开源；节选未列明更多局限。</div></section><section class="slide takeaway"><div class="kicker">第 17 页 / 共 17 页</div><h2>小结与可复现性</h2><div class='rule'></div><ul class="bullets"><li>使用定制扩展Rosetta描述符列表</li><li>验证RMSE为1.98 kcal/mol</li><li>PBEE是Python流程</li><li>复现入口：https://github.com/chavesejf/PBEE</li></ul><div class="notes"><b>讲解提示：</b>自动汇总：前文各节要点 + 复现入口；数字均来自论文或前文幻灯片。</div></section></div>
+<div class="zone left"></div><div class="zone right"></div>
+<div class="hint">← → 翻页</div>
+<div class="bar"><div class="bar-inner">
+  <button id="prev">上一页</button>
+  <div class="track"><div class="fill" id="fill"></div></div>
+  <span class="count"><b id="cur">1</b> / <span id="total">-</span></span>
+  <button id="next">下一页</button>
+</div></div>
+<script>
+(function(){
+  var slides=[].slice.call(document.querySelectorAll('.slide'));
+  var i=0;
+  var fill=document.getElementById('fill');
+  var cur=document.getElementById('cur');
+  var total=document.getElementById('total');
+  var prev=document.getElementById('prev');
+  var next=document.getElementById('next');
+  if(total) total.textContent=slides.length;
+  function show(k){
+    if(k<0||k>=slides.length) return;
+    slides[i].classList.remove('active');
+    i=k;
+    slides[i].classList.add('active');
+    if(cur) cur.textContent=(i+1);
+    if(fill) fill.style.width=((i+1)/slides.length*100)+'%';
+    if(prev) prev.disabled=(i===0);
+    if(next) next.disabled=(i===slides.length-1);
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  if(prev) prev.onclick=function(){show(i-1)};
+  if(next) next.onclick=function(){show(i+1)};
+  document.querySelector('.zone.left').onclick=function(){show(i-1)};
+  document.querySelector('.zone.right').onclick=function(){show(i+1)};
+  document.addEventListener('keydown',function(e){
+    if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){e.preventDefault();show(i+1)}
+    if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();show(i-1)}
+    if(e.key==='Home')show(0);
+    if(e.key==='End')show(slides.length-1);
+  });
+  var m=/[?&]p=([0-9]+)/.exec(location.search);
+  show(m?Math.max(0,Math.min(slides.length-1,parseInt(m[1],10)-1)):0);
+})();
+</script>
+</body>
+</html>

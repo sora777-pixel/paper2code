@@ -1,0 +1,255 @@
+{
+  "paper_id": "Estimating-Absolute-Protein-Protein-Binding-Free-Energi-5e8992ab",
+  "title": "Estimating Absolute Protein−Protein Binding Free Energies by a Super Learner Model",
+  "authors": [
+    "Elton J. F. Chaves",
+    "João Sartori",
+    "Whendel M. Santos",
+    "Carlos H. B. Cruz",
+    "Emmanuel N. Mhrous",
+    "Manassés F. Nacimento-Filho",
+    "Matheus V. F. Ferraz",
+    "Roberto D. Lins*"
+  ],
+  "source": "./paper.pdf",
+  "source_kind": "pdf",
+  "created_at": "2026-10-22T19:38:08",
+  "provider": "auto(openai-compatible(deepseek-flash @ https://api.deepseek.com/v1), remote)",
+  "explain_mode": [
+    "courseware",
+    "podcast"
+  ],
+  "artifacts": {
+    "explain": {
+      "generator": "auto(openai-compatible(deepseek-flash @ https://api.deepseek.com/v1), remote)",
+      "outline": [
+        "引子：蛋白互作与结合自由能",
+        "难题：为什么蛋白-蛋白ΔG难算",
+        "已有路线：从metadynamics到机器学习",
+        "本文要解决什么问题",
+        "核心思想：Rosetta描述符+超级学习器",
+        "数据：603个复合物如何筛选",
+        "特征：界面描述符体系",
+        "基学习器：十个模型的组合",
+        "超级学习器：权重怎么学",
+        "验证：105个独立复合物",
+        "结果：1.98 kcal/mol与0.70相关",
+        "对比：相对现有方法的定位",
+        "可解释性与错误分析",
+        "局限与PBEE复现路径"
+      ],
+      "courseware": "./explain/courseware.html",
+      "podcast_script": "./explain/podcast_script.md",
+      "podcast_srt": "./explain/podcast.srt",
+      "podcast_audio": "./explain/podcast.wav",
+      "n_slides": 17,
+      "n_turns": 26
+    },
+    "reproduce": {
+      "mode": "open_source",
+      "mode_label": "情形 A · 附带开源代码",
+      "ok": true,
+      "report": "./reproduce/repro_report.md",
+      "report_html": "./reproduce/repro_report.html",
+      "plan": "./reproduce/repro_plan.json",
+      "tables_csv": {},
+      "figures": [
+        "./reproduce/figures/F3_bitmap/preview_F3.png",
+        "./reproduce/figures/F4_bitmap/preview_F4.png",
+        "./reproduce/figures/F5_bitmap/preview_F5.png",
+        "./reproduce/figures/F6_bitmap/preview_F6.png"
+      ],
+      "checks": {
+        "total": 0,
+        "pass": 0,
+        "warn": 0,
+        "fail": 0,
+        "skipped": 0,
+        "score": 0.0,
+        "verdict": "not_verifiable"
+      },
+      "tech_guide": "./reproduce/TECH_GUIDE.md"
+    },
+    "mvp": {
+      "ok": true,
+      "generator": "offline-template:supervised_regression (llm demo failed)",
+      "demo_ok": true,
+      "report": "./mvp/MVP_REPORT.md",
+      "figures_md": "./mvp/figures/FIGURES.md",
+      "n_figure_specs": 6,
+      "n_figures_drawn": 0,
+      "version": 1,
+      "notebook": "export/mvp_demo.ipynb",
+      "streamlit_app": "export/streamlit_app.py"
+    },
+    "verification": {
+      "markdown": "./VERIFICATION.md",
+      "json": "./verification.json",
+      "n_claims": 8,
+      "n_reproduced": 1,
+      "n_partial": 0,
+      "n_not_reproducible": 7,
+      "n_untested": 0,
+      "n_judged": 8,
+      "reproduced_rate": 0.125,
+      "tested_rate": 1.0,
+      "verdict_line": "已复现 1 ｜ 部分 0 ｜ 不可复现 7 ｜ 未检验 0（共 8 条主张）"
+    }
+  },
+  "stats": {
+    "sections": 10,
+    "tables": 0,
+    "table_strategy": "none",
+    "figures": 7,
+    "algorithms": 0,
+    "code_refs": 5,
+    "provided_data": 0,
+    "parse_quality": 0.833,
+    "parse_quality_level": "ok",
+    "parse_quality_failed": [
+      "tables"
+    ]
+  },
+  "warnings": [
+    "正文引用 `Table N` ×4，但从 PDF 抽到 0 张表——该 PDF 的表格多为无框线三线表或按单元格独立排版，自动抽取失败。请勿据此认为论文没有表格。已自动尝试 `text` 策略（数值占比 <0.3 的版面切片会被拒绝），仍无可用表格；请对照原文人工确认。",
+    "语音由 Windows 内置 SAPI 合成（音色 Microsoft Huihui Desktop，离线可用）；已用 SSML 放大语速、音高与问句语调差异，但仍是单音色。",
+    "音频最终由「sapi」产出；更优后端未成功：[edge] edge-tts 合成失败 26 轮（网络受限或被拦截）：WSServerHandshakeError: 403, message='Invalid response status', url='wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientTo；已仅保留字幕与脚本",
+    "仓库内未找到可与论文表格直接对齐的结果文件；已生成 repro_run.sh，请先执行脚本产出 results/*.csv，再重新运行复现环节即可自动对标。",
+    "自动安装未开启；可执行 install_env.ps1 / install_env.sh，或加 --install-repo-deps（等价于 P2C_REPO_VENV_AUTO=1）",
+    "情形 A smoke 运行未跑通（运行失败）：ModuleNotFoundError: No module named 'joblib'",
+    "执行沙箱为**本地模式**（低隔离 / 高风险）：生成的代码在本机进程里运行，只有超时与独立工作目录约束；要真正的隔离请开启容器执行器（sandbox_mode=container）。",
+    "demo 的基础契约通过，但**论文声明的性质断言失败** → 判定该 demo 失败（明细见 MVP_REPORT.md「性质断言」）。",
+    "LLM 生成的 demo 未通过（论文声明的性质断言不成立（smoke 契约本身是通过的）；现场已保留在 demo_llm_failed/），改为输出离线脚手架。",
+    "模板 supervised_regression 未能在论文里找到可用数值列，demo 使用**合成数据**（只反映定性趋势，不是论文数值）。",
+    "模板 supervised_regression 是领域骨架，其中的论文特有部分（见 run_one 的 TODO）尚未实现；配置 LLM 后可在此骨架上填充以获得忠实的 MVP。",
+    "声明级核验：已复现 1 ｜ 部分 0 ｜ 不可复现 7 ｜ 未检验 0（共 8 条主张）（明细见 VERIFICATION.md）"
+  ],
+  "paths_rel": {
+    "root": "Estimating-Absolute-Protein-Protein-Binding-Free-Energi-5e8992ab",
+    "source": "paper.pdf",
+    "artifacts": {
+      "explain": {
+        "generator": "auto(openai-compatible(deepseek-flash @ https://api.deepseek.com/v1), remote)",
+        "outline": [
+          "引子：蛋白互作与结合自由能",
+          "难题：为什么蛋白-蛋白ΔG难算",
+          "已有路线：从metadynamics到机器学习",
+          "本文要解决什么问题",
+          "核心思想：Rosetta描述符+超级学习器",
+          "数据：603个复合物如何筛选",
+          "特征：界面描述符体系",
+          "基学习器：十个模型的组合",
+          "超级学习器：权重怎么学",
+          "验证：105个独立复合物",
+          "结果：1.98 kcal/mol与0.70相关",
+          "对比：相对现有方法的定位",
+          "可解释性与错误分析",
+          "局限与PBEE复现路径"
+        ],
+        "courseware": "explain/courseware.html",
+        "podcast_script": "explain/podcast_script.md",
+        "podcast_srt": "explain/podcast.srt",
+        "podcast_audio": "explain/podcast.wav",
+        "n_slides": 17,
+        "n_turns": 26
+      },
+      "reproduce": {
+        "mode": "open_source",
+        "mode_label": "情形 A · 附带开源代码",
+        "ok": true,
+        "report": "reproduce/repro_report.md",
+        "report_html": "reproduce/repro_report.html",
+        "plan": "reproduce/repro_plan.json",
+        "tables_csv": {},
+        "figures": [
+          "reproduce/figures/F3_bitmap/preview_F3.png",
+          "reproduce/figures/F4_bitmap/preview_F4.png",
+          "reproduce/figures/F5_bitmap/preview_F5.png",
+          "reproduce/figures/F6_bitmap/preview_F6.png"
+        ],
+        "checks": {
+          "total": 0,
+          "pass": 0,
+          "warn": 0,
+          "fail": 0,
+          "skipped": 0,
+          "score": 0.0,
+          "verdict": "not_verifiable"
+        },
+        "tech_guide": "reproduce/TECH_GUIDE.md"
+      },
+      "mvp": {
+        "ok": true,
+        "generator": "offline-template:supervised_regression (llm demo failed)",
+        "demo_ok": true,
+        "report": "mvp/MVP_REPORT.md",
+        "figures_md": "mvp/figures/FIGURES.md",
+        "n_figure_specs": 6,
+        "n_figures_drawn": 0,
+        "version": 1,
+        "notebook": "export/mvp_demo.ipynb",
+        "streamlit_app": "export/streamlit_app.py"
+      },
+      "verification": {
+        "markdown": "VERIFICATION.md",
+        "json": "verification.json",
+        "n_claims": 8,
+        "n_reproduced": 1,
+        "n_partial": 0,
+        "n_not_reproducible": 7,
+        "n_untested": 0,
+        "n_judged": 8,
+        "reproduced_rate": 0.125,
+        "tested_rate": 1.0,
+        "verdict_line": "已复现 1 ｜ 部分 0 ｜ 不可复现 7 ｜ 未检验 0（共 8 条主张）"
+      }
+    }
+  },
+  "progress": {
+    "paper_id": "Estimating-Absolute-Protein-Protein-Binding-Free-Energi-5e8992ab",
+    "updated_at": "2026-10-22T19:49:44",
+    "resume": false,
+    "current": "",
+    "failed": [],
+    "reused": [],
+    "stages": [
+      {
+        "name": "explain",
+        "status": "done",
+        "elapsed_s": 126.06,
+        "note": "",
+        "artifacts": [
+          "./explain/courseware.html",
+          "./explain/podcast_script.md",
+          "./explain/podcast.wav"
+        ],
+        "started_at": "2026-10-22T19:38:08",
+        "finished_at": "2026-10-22T19:40:14"
+      },
+      {
+        "name": "reproduce",
+        "status": "done",
+        "elapsed_s": 62.31,
+        "note": "",
+        "artifacts": [
+          "./reproduce/repro_report.md"
+        ],
+        "started_at": "2026-10-22T19:40:14",
+        "finished_at": "2026-10-22T19:41:16"
+      },
+      {
+        "name": "mvp",
+        "status": "done",
+        "elapsed_s": 507.57,
+        "note": "",
+        "artifacts": [
+          "./mvp/MVP_REPORT.md",
+          "./mvp/figures/FIGURES.md"
+        ],
+        "started_at": "2026-10-22T19:41:16",
+        "finished_at": "2026-10-22T19:49:44"
+      }
+    ],
+    "notes": []
+  }
+}
